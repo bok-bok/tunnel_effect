@@ -1,0 +1,7 @@
+/src/weights/resnet18_swav.ckpt
+results
+venv
+__pycache__
+data
+.DS_Store
+*.png
