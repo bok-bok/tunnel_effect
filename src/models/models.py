@@ -141,7 +141,7 @@ class MLP_5(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, weights_path=None):
+    def __init__(self, device="mps", weights_path=None):
         super(MLP, self).__init__()
         layers = []
         input_size = 32 * 32 * 3  # CIFAR-10 images are 32x32 pixels with 3 color channels
@@ -165,7 +165,7 @@ class MLP(nn.Module):
         self.layers = nn.Sequential(*layers)
 
         if weights_path:
-            self.load_state_dict(torch.load(weights_path))
+            self.load_state_dict(torch.load(weights_path, map_location=device))
 
     def forward(self, x):
         x = x.view(x.size(0), -1)  # Flatten the input
