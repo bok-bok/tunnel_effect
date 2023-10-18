@@ -1,10 +1,11 @@
 import argparse
 
+import matplotlib.pyplot as plt
 import torch
 from torchvision.models import MobileNet_V3_Large_Weights, ResNet18_Weights, resnet50
 
 from models.models import MLP, MobileV3, ResNet18, ResNet34
-from utils.analyzer import ConvAnalyzer, MLPAnalyzer, ResNetAnalyzer
+from utils.analyzer import MLPAnalyzer, ResNetAnalyzer
 
 
 def get_analyzer(model, model_name: str, dummy_input):
@@ -26,7 +27,7 @@ def get_args():
     return args
 
 
-def get_model(model_name: str, pretrained: bool = True):
+def get_model(model_name: str, pretrained: bool = True, weights_path: str = None):
     if "resnet18" in model_name:
         if pretrained:
             if "swav" in model_name:
@@ -44,17 +45,20 @@ def get_model(model_name: str, pretrained: bool = True):
 
     elif "resnet34" in model_name:
         if pretrained:
-            model = ResNet34(weights_path="weights/resnet34.pth")
+            if weights_path is not None:
+                print(f"loading {weights_path}")
+                model = ResNet34(weights_path=weights_path)
+            else:
+                model = ResNet34(weights_path="weights/resnet34_0.pth")
         else:
             model = ResNet34()
-    elif model_name == "mobilenetv3":
-        if pretrained:
-            model = MobileV3(weights_path=MobileNet_V3_Large_Weights.DEFAULT)
-        else:
-            model = MobileV3()
     elif "mlp" in model_name:
         if pretrained:
-            model = MLP(weights_path="weights/mlp.pth")
+            if weights_path is not None:
+                print(f"loading {weights_path}")
+                model = MLP(weights_path=weights_path)
+            else:
+                model = MLP(weights_path="weights/mlp_0.pth")
 
         else:
             model = MLP()
