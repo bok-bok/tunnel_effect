@@ -5,3 +5,5 @@ __pycache__
 data
 .DS_Store
 *.png
+/src/values/representations
+/src/values/full_sigs
