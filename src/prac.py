@@ -1,5 +1,9 @@
+import os
+
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker  # Import ticker module for custom formatting
 import numpy as np
+import scienceplots
 import torch
 import torchvision
 from scipy.linalg import svd
@@ -11,7 +15,9 @@ from torch import nn
 from torchvision.models import resnet18
 
 from data_loader import get_data_loader
-from utils import get_analyzer
+from utils import get_analyzer, get_model
+
+os.environ["PATH"] += os.pathsep + "/Library/TeX/texbin"
 
 
 def mean_center(X):
@@ -20,109 +26,129 @@ def mean_center(X):
     return X_prime
 
 
-def qr_svd_method(X):
+def random_projection_method(X, b):
     X = mean_center(X)
-    Q, R = torch.linalg.qr(X_prime.T)
-    U, S, V = torch.linalg.svd(R, full_matrices=False)
-
+    G = torch.randn(b, X.size(0))
+    G = G / torch.norm(G, dim=0, keepdim=True)  # Normalize columns to unit length
+    X_reduced = torch.mm(G, X)
+    S = torch.linalg.svdvals(X_reduced)
     S_squared = S**2
     S_normalized = S_squared / torch.sum(S_squared)
     return S_normalized.detach()
 
 
-def direct_svd_method(X_prime):
-    X = mean_center(X)
-    U, S, V = torch.svd(X_prime)
-    S_squared = S**2
-    S_normalized = S_squared / torch.sum(S_squared)
-    return S_normalized
+def compuate_singular_values(representation):
+    cov = torch.cov(representation)
+    print(cov.shape)
+    S = torch.linalg.svdvals(cov)
+    print(S.shape)
+    return S
 
 
-def random_projection_method(X, b):
-    X = mean_center(X)
-    G = torch.randn(b, X.size(0))
-    G = G / torch.norm(G, dim=1, keepdim=True)  # Normalize columns to unit length
-    X_reduced = torch.mm(G, X)
-    U, S, V = torch.linalg.svd(X_reduced, full_matrices=False)
-    S_squared = S**2
-    S_normalized = S_squared / torch.sum(S_squared)
-    return S_normalized
+def compute_max_abs_error(s_reduced, s_original):
+    # s_original = s_original / torch.sum(s_original)
+    s_reduced_padded = torch.cat((s_reduced, torch.zeros(len(s_original) - len(s_reduced))))
+    max_abs_error = (s_reduced_padded - s_original).abs().max()
+    return max_abs_error.item()
 
 
-data_name = "cifar10"
-train_dataloader, test_dataloader = get_data_loader(data_name, batch_size=500)
-
-# vgg19 = torchvision.models.vgg19(pretrained=False, num_classes=10)
-
-model = torchvision.models.resnet34(pretrained=False)
-model.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-model.maxpool = nn.Identity()
-outputs = []
-
-input_data = next(iter(test_dataloader))[0]
+def compute_mean_square_error(s_reduced, s_original):
+    s_reduced_padded = torch.cat((s_reduced, torch.zeros(len(s_original) - len(s_reduced))))
+    mean_sqaure_error = torch.mean((s_reduced_padded - s_original) ** 2)
+    return mean_sqaure_error.item()
 
 
-def hook_fn(module, input, output):
-    output = output.view(output.size(0), -1)
-    outputs.append(output)
+def representations_to_full_singular_values(model_name):
+    def helper(model_name, file):
+        load_path = f"values/representations/{model_name}/{file}.pt"
+        print(f"processing {file}")
+
+        re = torch.load(load_path).detach().cpu()
+        print(f"representation shape: {re.shape}")
+        cov_mat = torch.cov(re, correction=1)
+        print(f"cov_mat shape: {cov_mat.shape}")
+        S = torch.linalg.svdvals(cov_mat)
+        # save
+        save_path = f"values/full_sigs/{model_name}/{file}.pt"
+        torch.save(S, save_path)
+
+    files = os.listdir(f"values/representations/{model_name}")
+    files.sort(key=lambda x: int(x.split("_")[0]), reverse=True)
+    files = files[17:]
+    print(files)
+    for file in files:
+        file = file.split(".")[0]
+        helper(model_name, file)
 
 
-hooks = []
+def compute_error_original_vs_random_projection(model_name, files):
+    def helper(model_name, file):
+        projection_dims = [512, 1024, 2048, 4096, 8192, 16384]
+        representation = torch.load(f"values/representations/{model_name}/{file}.pt").detach().cpu()
+        features_size = representation.shape[0]
+
+        target_singular_values = (
+            torch.load(f"values/full_sigs/{model_name}/{file}.pt").detach().cpu()
+        )
+        target_singular_values = target_singular_values / torch.sum(target_singular_values)
+        original_MAE = {}
+        original_MSE = {}
+        for dim in projection_dims:
+            if dim >= features_size:
+                break
+            print(f"start computing original error for {dim} dimensions")
+            cur_representation = representation[:dim]
+            print(cur_representation.shape)
+            cov_mat = torch.cov(cur_representation, correction=1)
+            print(cov_mat.shape)
+            S_reduced = torch.linalg.svdvals(cov_mat)
+            S_reduced = S_reduced / torch.sum(S_reduced)
+
+            MAE = compute_max_abs_error(S_reduced, target_singular_values)
+            MSE = compute_mean_square_error(S_reduced, target_singular_values)
+            print(f"MAE: {MAE}")
+            print(f"MSE: {MSE}")
+            original_MAE[dim] = MAE
+            original_MSE[dim] = MSE
+            print()
+        torch.save(original_MAE, f"values/errors/{model_name}/original_MAE_{file}.pt")
+        torch.save(original_MSE, f"values/errors/{model_name}/original_MSE_{file}.pt")
+
+        projection_MAE = {}
+        projection_MSE = {}
+        for i in range(3):
+            print(f"{i+1}th iteration ======================")
+            for b in projection_dims:
+                if b >= features_size:
+                    break
+                print(f"Computing singular values for {b} projection dimensions")
+                S_reduced = random_projection_method(representation, b)
+                MAE = compute_max_abs_error(S_reduced, target_singular_values)
+                MSE = compute_mean_square_error(S_reduced, target_singular_values)
+                if b not in projection_MAE:
+                    projection_MAE[b] = [MAE]
+                    projection_MSE[b] = [MSE]
+                else:
+                    projection_MAE[b].append(MSE)
+                    projection_MSE[b].append(MSE)
+
+                print()
+        torch.save(projection_MAE, f"values/errors/{model_name}/projection_MAE_{file}.pt")
+        torch.save(projection_MSE, f"values/errors/{model_name}/projection_MSE_{file}.pt")
+
+    for file in files:
+        helper(model_name, file)
 
 
-def register_hooks(model):
-    for layer in model.children():
-        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
-            hook = layer.register_forward_hook(hook_fn)
-            hooks.append(hook)
-        # If the layer has children, recursively add hooks to those too
-        if len(list(layer.children())) > 0:
-            register_hooks(layer)
+# representations_to_full_singular_values("resnet34_0")
 
 
-def register_hooks_resnet(model):
-    layers = []
-    layers.append(model.conv1)
-    for block_name in ["layer1", "layer2", "layer3", "layer4"]:
-        block = getattr(model, block_name)
-        for layer in block:
-            layers.extend([layer.conv1, layer.conv2])
-    for layer in layers:
-        layer.register_forward_hook(hook_fn)
-
-
-# input_data = torch.randn(10000, 65536)
-# input_data = input_data.T
-# X_prime = mean_center(input_data)
-# S = qr_svd_method(X_prime)
-# print(S[:10])
-
-
-# register_hooks_resnet(model)
-print("laodign")
-representations = torch.load("values/representations/resnet34.pt")
-# sigs = torch.load("values/sigs/resnet34.pt")
-
-qr_sigs = []
-for re in representations:
-    re = re.T
-    print(re.size())
-    if re.size(0) > 8000:
-        re = re[:8000]
-    X_prime = mean_center(re)
-    sig = qr_svd_method(X_prime)
-    print(sig.size())
-    qr_sigs.append(sig)
-
-torch.save(qr_sigs, "values/qr_sigs/resnet34.pt")
-
-# for idx, output in enumerate(outputs):
-#     # output = output.flatten()
-#     sig = sigs[idx]
-#     normalized_sig = sig / torch.sum(sig)
-#     qr_svd = qr_svd_method(output)
-#     print(f"size comparision : {qr_svd.size()} vs {normalized_sig.size()}")
-#     print(f"qr_svd: {qr_svd[:10]}")
-#     print(f"normalized_sig: {normalized_sig[:10]}")
-
-#     print(f"layer {idx} shape: {output.shape}")
+# # compute_error_original_vs_random_projection("resnet34_0", "16_16384.pt")
+model_name = "resnet34_0"
+target_dim = "16384"
+original = True
+files = os.listdir(f"values/representations/{model_name}")
+files = [file.split(".")[0] for file in files if target_dim in file]
+files.sort(key=lambda x: int(x.split("_")[0]), reverse=True)
+# print(files)
+compute_error_original_vs_random_projection(model_name, files)
