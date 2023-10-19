@@ -55,7 +55,7 @@ class ResNet(nn.Module, metaclass=ABCMeta):
         if weights_path:
             if "swav" in weights_path:
                 print("loading swav model")
-                state = torch.load("resnet18_swav.ckpt")["state_dict"]
+                state = torch.load(weights_path)["state_dict"]
                 for k in list(state.keys()):
                     if "backbone" in k:
                         state[k.replace("backbone.", "")] = state[k]
