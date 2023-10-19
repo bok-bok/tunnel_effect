@@ -14,32 +14,31 @@ if __name__ == "__main__":
     # config
     data_name = "cifar10"
     batch_size = 512
-    input_size = 10000
+    input_size = 1000
     pretrained = True
     OOD = False
 
-    target = [0, 1, 2]
-    for i in target:
-        train_dataloader, test_dataloader = get_data_loader(data_name, batch_size=batch_size)
-        _, input_loader = get_data_loader(data_name, batch_size=input_size)
-        model_name = f"resnet34_{i}"
-        weight_path = f"weights/{model_name}.pth"
-        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    train_dataloader, test_dataloader = get_data_loader(data_name, batch_size=batch_size)
+    _, input_loader = get_data_loader(data_name, batch_size=input_size)
+    model_name = f"resnet34_0"
+    weight_path = f"weights/{model_name}.pth"
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
-        # use model_name and pretrained to get model
-        model = get_model(model_name, pretrained, weight_path)
-        model.to(device)
+    # use model_name and pretrained to get model
+    model = get_model(model_name, pretrained, weight_path)
+    model.to(device)
 
-        # dummy input help analyzer to get the shape of output
-        if data_name == "cifar10":
-            dummy_input = torch.randn(1, 3, 32, 32).to(device)
-        else:
-            dummy_input = torch.randn(1, 3, 224, 224).to(device)
+    # dummy input help analyzer to get the shape of output
+    if data_name == "cifar10":
+        dummy_input = torch.randn(1, 3, 32, 32).to(device)
+    else:
+        dummy_input = torch.randn(1, 3, 224, 224).to(device)
 
-        input_data = next(iter(input_loader))[0].to(device)
+    input_data = next(iter(input_loader))[0].to(device)
+    # prepare data for analyzer
 
-        analyzer = get_analyzer(model, model_name, dummy_input)
-        # analyzer.download_representation(input_data)
+    analyzer = get_analyzer(model, model_name, dummy_input)
 
-        analyzer.download_singular_values(input_data)
-        # analyzer.download_accuarcy(train_dataloader, test_dataloader, OOD)
+    analyzer.save_dimensions()
+    analyzer.download_singular_values(input_data)
+    # analyzer.download_accuarcy(train_dataloader, test_dataloader, OOD)
