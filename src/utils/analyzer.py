@@ -17,7 +17,6 @@ def random_projection_method(X, b, normalized=False):
     G = torch.randn(b, X.size(0))
     G = G / torch.norm(G, dim=0, keepdim=True)  # Normalize columns to unit length
     X_reduced = torch.mm(G, X)
-    print(f"X_reduced shape {X_reduced.shape}")
     S = torch.linalg.svdvals(X_reduced)
     S_squared = S**2
     if normalized:
@@ -66,6 +65,17 @@ class Analyzer(metaclass=ABCMeta):
             hook = layer.register_forward_hook(self.hook_compute_singular_values)
             self.hooks.append(hook)
 
+    def save_dimensions(self):
+        self.register_full_hooks()
+        self.forward(self.dummy_data)
+        dims = []
+        for layer in self.representations:
+            dims.append(layer.size(1))
+        name = self.name.split("_")[0]
+        torch.save(dims, f"values/dimensions/{name}.pt")
+
+        self.remove_hooks()
+
     def hook_full(self, module, input, output):
         output = self.preprocess_output(output)
         self.representations.append(output)
@@ -73,8 +83,14 @@ class Analyzer(metaclass=ABCMeta):
     def hook_compute_singular_values(self, module, input, output):
         output = self.preprocess_output(output).detach().cpu().T
         # skip dummy
+        # output = output[:8000]
+        # print(output.shape)
+        # cov_mat = torch.cov(output, correction=1)
+        # print(cov_mat.size())
+        # singular_values = torch.linalg.matrix_rank(cov_mat)
         if output.size(1) == 1:
             return
+
         if output.size(0) <= self.b:
             print(f"use full matrix : {output.size()}")
             cov_mat = torch.cov(output, correction=1)
@@ -82,6 +98,7 @@ class Analyzer(metaclass=ABCMeta):
         else:
             print(f"use random projection method : {output.size()}")
             singular_values = random_projection_method(output, self.b)
+        print(singular_values[:10])
         self.singular_values.append(singular_values)
 
     def init_classifers(self):
@@ -90,7 +107,7 @@ class Analyzer(metaclass=ABCMeta):
         self.forward(self.dummy_data)
 
         for representation in self.representations:
-            cur_classifier = nn.Linear(representation.size(1), 100)
+            cur_classifier = nn.Linear(representation.size(1), 10)
 
             cur_optim = optim.Adam(cur_classifier.parameters(), lr=0.001)
             cur_classifier.to(self.device)
@@ -110,7 +127,7 @@ class Analyzer(metaclass=ABCMeta):
     def download_singular_values(self, input_data):
         self.register_singular_hooks()
         self.forward(input_data)
-        torch.save(self.singular_values, f"values/singular_values/{self.name}.pt")
+        torch.save(self.singular_values, f"values/singular_values/{self.name}_original_500.pt")
         self.remove_hooks()
 
     def download_accuarcy(self, train_data_loader, test_dataloader, OOD):
@@ -162,7 +179,7 @@ class Analyzer(metaclass=ABCMeta):
                 ):
                     representation = representation.to(self.device)
                     output = classifier(representation)
-                    loss = self.criterion(output, target)
+                    # loss = self.criterion(output, target)
                     correct = output.argmax(dim=1).eq(target).sum().item()
                     accuracies[idx] += correct
         accuracies = [
