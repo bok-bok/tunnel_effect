@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import torch
 from torchvision.models import MobileNet_V3_Large_Weights, ResNet18_Weights, resnet50
 
-from models.models import MLP, MobileV3, ResNet18, ResNet34
+from models.models import MLP, MobileV3, ResNet18, ResNet34, ResNet34_GN
 from utils.analyzer import MLPAnalyzer, ResNetAnalyzer
 
 
@@ -44,14 +44,18 @@ def get_model(model_name: str, pretrained: bool = True, weights_path: str = None
             model = resnet50()
 
     elif "resnet34" in model_name:
-        if pretrained:
-            if weights_path is not None:
-                print(f"loading {weights_path}")
-                model = ResNet34(weights_path=weights_path)
-            else:
-                model = ResNet34(weights_path="weights/resnet34_0.pth")
+        if "GN" in model_name:
+            print("loading GN model")
+            model = ResNet34_GN(weights_path=weights_path)
         else:
-            model = ResNet34()
+            if pretrained:
+                if weights_path is not None:
+                    print(f"loading {weights_path}")
+                    model = ResNet34(weights_path=weights_path)
+                else:
+                    model = ResNet34(weights_path="weights/resnet34_0.pth")
+            else:
+                model = ResNet34()
     elif "mlp" in model_name:
         if pretrained:
             if weights_path is not None:

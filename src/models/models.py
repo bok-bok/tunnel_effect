@@ -11,6 +11,8 @@ from lightning.pytorch.utilities.types import STEP_OUTPUT
 from torch.utils.data import DataLoader
 from torchvision import models, transforms
 
+from models.resnet_models_GN_WS import resnet34
+
 
 class MobileV3(nn.Module):
     def __init__(self, device="mps", weights_path=None):
@@ -85,59 +87,10 @@ class ResNet34(ResNet):
     def init_model(self):
         self.resnet = models.resnet34(weights=None)
 
-    # def __init__(self, device="mps", weights_path=None):
-    #     """ResNet34 model for CIFAR-10
 
-    #     Args:
-    #         weights_path (str): Path to pretrained weights
-    #         device (str): Device to load weights onto
-    #     """
-    #     super().__init__()
-    #     self.resnet34 = models.resnet34(weights=None)
-    #     self.resnet34.conv1 = nn.Conv2d(
-    #         3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
-    #     )
-
-    #     self.resnet34.fc = nn.Linear(512, 10)
-    #     if weights_path:
-    #         print("loading model")
-    #         self.resnet34.load_state_dict(torch.load(weights_path, map_location=device))
-
-    # def forward(self, x):
-    #     return self.resnet34(x)
-
-
-class MLP_5(nn.Module):
-    def __init__(self, weights_path=None):
-        super(MLP_5, self).__init__()
-        layers = []
-        input_size = 32 * 32 * 3  # CIFAR-10 images are 32x32 pixels with 3 color channels
-
-        layers = []
-        layers.append(nn.Linear(input_size, 1028))
-        layers.append(nn.ReLU())
-
-        for _ in range(5):  # 11 layers in total (1 to 12)
-            layers.append(nn.Linear(1028, 1028))
-            layers.append(nn.ReLU())
-
-        # 13
-        layers.append(nn.Linear(1028, 10))  # 10 output classes for CIFAR-10
-
-        # layer init
-        for layer in layers:
-            if isinstance(layer, nn.Linear):
-                nn.init.xavier_uniform_(layer.weight)
-
-        self.layers = nn.Sequential(*layers)
-
-        if weights_path:
-            self.load_state_dict(torch.load(weights_path))
-
-    def forward(self, x):
-        x = x.view(x.size(0), -1)  # Flatten the input
-        x = self.layers(x)
-        return x
+class ResNet34_GN(ResNet):
+    def init_model(self):
+        self.resnet = resnet34()
 
 
 class MLP(nn.Module):
