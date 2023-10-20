@@ -22,7 +22,7 @@ def get_data_loader(dataset_name, batch_size=512):
 
 def get_CIFAR_100_data_loader(train_transform, test_transform, batch_size=512):
     # get 10 random classes from CIFAR100
-    classes = torch.randperm(100)[:10]
+    classes = torch.randperm(100)[:10].tolist()
     print("loading CIFAR100 data")
     train_dataset = torchvision.datasets.CIFAR100(
         root="./data", train=True, transform=train_transform, download=True
@@ -30,10 +30,17 @@ def get_CIFAR_100_data_loader(train_transform, test_transform, batch_size=512):
     test_dataset = torchvision.datasets.CIFAR100(
         root="./data", train=False, transform=test_transform, download=True
     )
+    class_mapping = {original: new for new, original in enumerate(classes)}
 
     # Get indices of desired classes
     train_indices = [i for i in range(len(train_dataset)) if train_dataset.targets[i] in classes]
     test_indices = [i for i in range(len(test_dataset)) if test_dataset.targets[i] in classes]
+
+    # Update the targets in train_dataset and test_dataset to the new labels
+    for i in train_indices:
+        train_dataset.targets[i] = class_mapping[train_dataset.targets[i]]
+    for i in test_indices:
+        test_dataset.targets[i] = class_mapping[test_dataset.targets[i]]
 
     # Create Subset objects with desired indices
     train_subset = Subset(train_dataset, train_indices)
