@@ -10,7 +10,7 @@ from scipy.special import expit  # This is the sigmoid function
 plt.style.use("science")
 
 os.environ["PATH"] += os.pathsep + "/Library/TeX/texbin"
-plt.rc("font", size=14, weight="bold")
+plt.rc("font", size=16, weight="bold")
 
 plt.rc("lines", linewidth=2)
 
@@ -92,7 +92,7 @@ def find_tunnel_start(accuracies, threshold=0.95):
     # find when accuracy reach 95% final accuracy
     for idx, acc in enumerate(accuracies):
         if acc > final_acc * threshold:
-            return idx
+            return idx + 1
 
 
 def plot_error_dimension(model_name, dim, original=False, download=False):
@@ -178,6 +178,62 @@ def get_mean_std(model_name, target_value_type):
     return means, stds
 
 
+def plot_mlp():
+    model_name = "mlp"
+    counts_mean, counts_std = get_mean_std(model_name, "rank")
+    acc_mean, acc_std = get_mean_std(model_name, "acc")
+    ood_mean, ood_std = get_mean_std(model_name, "ood_acc")
+
+    x_axis = range(1, len(counts_mean) + 1)
+
+    tunnel_start_idx = find_tunnel_start(acc_mean, 0.98)
+
+    fig, ax1 = plt.subplots(figsize=(6, 4))
+    ax1.plot(x_axis, counts_mean, label="Rank")
+
+    ax1.fill_between(
+        x_axis,
+        counts_mean - counts_std,
+        counts_mean + counts_std,
+        alpha=0.2,
+    )
+
+    ax1.set_xlabel("Layers")
+    ax1.set_ylabel("Rank")
+    ax2 = ax1.twinx()
+    # ax2.plot(x_axis, acc_mean, label="Accuracy")
+    # ax2.fill_between(
+    #     x_axis,
+    #     acc_mean - acc_std,
+    #     acc_mean + acc_std,
+    #     alpha=0.2,
+    # )
+
+    ax2.plot(x_axis, ood_mean, label="OOD acc")
+    ax2.fill_between(
+        x_axis,
+        ood_mean - ood_std,
+        ood_mean + ood_std,
+        alpha=0.2,
+    )
+    x_axis = range(1, len(counts_mean) + 1)
+
+    ax2.set_ylabel("Accuracy")
+    lines = ax1.get_lines() + ax2.get_lines()
+    labels = [line.get_label() for line in lines]
+    colors = ["blue", "orange", "green", "red", "purple", "brown", "pink", "gray"]
+    for i, line in enumerate(lines):
+        line.set_color(colors[i % len(colors)])
+    plt.legend(lines, labels, loc="lower center")
+    plt.xlim(left=x_axis[0], right=x_axis[-1])
+    plt.axvspan(tunnel_start_idx, len(counts_mean), alpha=0.2, color="green")
+    plt.xticks(x_axis, labels=[str(x) for x in x_axis])
+
+    plt.grid(axis="both")
+    plt.savefig(f"mlp_ood_rank_acc", dpi=300)
+    plt.show()
+
+
 def plot_resnet():
     model_name = "resnet34"
     counts_mean, counts_std = get_mean_std(model_name, "rank")
@@ -189,7 +245,7 @@ def plot_resnet():
     tunnel_start_idx = find_tunnel_start(acc_mean) + 2
 
     fig, ax1 = plt.subplots(figsize=(6, 4))
-    ax1.plot(x_axis, counts_mean, label="Ranks")
+    ax1.plot(x_axis, counts_mean, label="Rank")
 
     ax1.fill_between(
         x_axis,
@@ -199,23 +255,24 @@ def plot_resnet():
     )
 
     ax1.set_xlabel("Layers")
-    ax1.set_ylabel("Ranks")
+    ax1.set_ylabel("Rank")
     ax2 = ax1.twinx()
-    ax2.plot(x_axis, acc_mean, label="Accuracy")
-    ax2.fill_between(
-        x_axis,
-        acc_mean - acc_std,
-        acc_mean + acc_std,
-        alpha=0.2,
-    )
 
-    # ax2.plot(x_axis, ood_mean, label="OOD acc")
+    # ax2.plot(x_axis, acc_mean, label="Accuracy")
     # ax2.fill_between(
     #     x_axis,
-    #     ood_mean - ood_std,
-    #     ood_mean + ood_std,
+    #     acc_mean - acc_std,
+    #     acc_mean + acc_std,
     #     alpha=0.2,
     # )
+
+    ax2.plot(x_axis, ood_mean, label="OOD acc")
+    ax2.fill_between(
+        x_axis,
+        ood_mean - ood_std,
+        ood_mean + ood_std,
+        alpha=0.2,
+    )
 
     ax2.set_ylabel("Accuracy")
     lines = ax1.get_lines() + ax2.get_lines()
@@ -226,168 +283,79 @@ def plot_resnet():
     plt.legend(lines, labels, loc="lower center")
     plt.xlim(left=3, right=len(counts_mean) + 2)
     plt.axvspan(tunnel_start_idx, len(counts_mean) + 2, alpha=0.2, color="green")
+    plt.xticks(x_axis[::2], labels=[str(x) for x in x_axis[::2]])
 
     plt.grid(axis="both")
-    plt.savefig(f"resnet_ranks_acc", dpi=300)
+    plt.savefig(f"resnet34_ood_ranks_acc", dpi=300)
     plt.show()
 
 
-# model_name = "mlp_200_0"
-# sigs = torch.load(f"values/singular_values/{model_name}.pt")
-# acc = torch.load(f"values/acc/{model_name}.pt")
-# start_tunnel = find_tunnel_start(acc)
-# # counts = get_ranks(sigs, 0.001)
-# counts = count_sigs(sigs)
+def plot_rank_acc(model_name, OOD, download=False, skip_count=0):
+    singular_values = torch.load(f"values/singular_values/{model_name}.pt")
 
-# fig, ax1 = plt.subplots(figsize=(6, 4))
-# x_axis = range(1, len(counts) + 1)
-# ax1.plot(x_axis, counts)
-# ax1.set_xlabel("layers")
-# ax1.set_ylabel("ranks")
+    # acc for probe start of tunnel
+    acc_for_tunnel = torch.load(f"values/acc/{model_name}.pt")
+    if not OOD:
+        acc_path = f"values/acc/{model_name}.pt"
+    else:
+        acc_path = f"values/ood_acc/{model_name}.pt"
 
-# ax2 = ax1.twinx()
-# ax2.plot(x_axis, acc, label="accuracy")
-# ax2.set_ylabel("accuracy")
-# plt.axvspan(start_tunnel, len(counts), alpha=0.2, color="green")
-# lines = ax1.get_lines() + ax2.get_lines()
-# labels = [line.get_label() for line in lines]
-# colors = ["blue", "orange", "green", "red", "purple", "brown", "pink", "gray"]
-# for i, line in enumerate(lines):
-#     line.set_color(colors[i % len(colors)])
-# ax1.legend(lines, labels, loc="best")
-# plt.xlim(left=1, right=len(counts))
-# plt.show()
-# i = 2
-# model_name = f"resnet34_{i}_4096"
+    rank = get_dynamic_ranks(model_name, singular_values)[skip_count:]
+    accuracy = torch.load(acc_path)[skip_count:]
+
+    x_axis = range(skip_count + 1, len(rank) + skip_count + 1)
+
+    tunnel_start_idx = find_tunnel_start(acc_for_tunnel)
+
+    fig, ax1 = plt.subplots(figsize=(6, 4))
+    ax1.plot(x_axis, rank, label="Rank")
+
+    ax1.set_xlabel("Layers")
+    ax1.set_ylabel("Rank")
+    ax2 = ax1.twinx()
+    ax2.plot(x_axis, accuracy, label="Accuracy")
+
+    ax2.set_ylabel("Accuracy")
+
+    lines = ax1.get_lines() + ax2.get_lines()
+    labels = [line.get_label() for line in lines]
+    colors = ["blue", "orange", "green", "red", "purple", "brown", "pink", "gray"]
+    for i, line in enumerate(lines):
+        line.set_color(colors[i % len(colors)])
+    plt.legend(lines, labels, loc="lower center")
+    # show xticks
+    # if len(xticks) > 20: skip by 2
+    if len(x_axis) > 20:
+        plt.xticks(x_axis[::2], labels=[str(x) for x in x_axis[::2]])
+    else:
+        plt.xticks(x_axis, labels=[str(x) for x in x_axis])
+
+    plt.xlim(left=x_axis[0], right=x_axis[-1])
+    plt.axvspan(tunnel_start_idx, len(rank) + skip_count, alpha=0.2, color="green")
+
+    plt.grid()
+    if download:
+        if OOD:
+            plt.savefig(f"{model_name}_ood_rank_accuracy", dpi=300)
+        else:
+            plt.savefig(f"{model_name}_rank_accuracy", dpi=300)
+    plt.show()
+
+
 if __name__ == "__main__":
-    plot_resnet()
-    # model_name = "resnet34_0_train"
-    # plt.figure(figsize=(6, 4))
-    # sig = torch.load(f"values/singular_values/{model_name}.pt")
-    # rank = get_dynamic_ranks(model_name, sig)
-    # xtick = range(1, len(rank) + 1)
-    # plt.plot(
-    #     xtick,
-    #     rank,
-    # )
-    # plt.grid()
-    # # skip x tick by 2
-    # plt.xticks(xtick[::2], labels=[str(x) for x in xtick[::2]])
-    # plt.savefig(f"resnet34_grid.png", dpi=300)
-    # plt.show()
-    # model_name = "resnet18_swav"
-    # resnet_sig = torch.load(f"values/singular_values/{model_name}.pt")[2:]
-    # acc = torch.load(f"values/acc/{model_name}.pt")[2:]
-    # ranks = get_dynamic_ranks(model_name, resnet_sig)
-    # fig, ax1 = plt.subplots(figsize=(6, 4))
-    # ax1.plot(ranks, label="ranks")
-    # ax2 = ax1.twinx()
-    # ax2.plot(acc, label="acc")
-    # start_tunnel = find_tunnel_start(acc)
-    # plt.axvspan(start_tunnel, len(ranks), alpha=0.2, color="green")
-    # lines = ax1.get_lines() + ax2.get_lines()
-    # labels = [line.get_label() for line in lines]
-    # colors = ["blue", "orange", "green", "red", "purple", "brown", "pink", "gray"]
-    # for i, line in enumerate(lines):
-    #     line.set_color(colors[i % len(colors)])
-    # ax1.legend(lines, labels, loc="best")
-    # plt.xlim(left=0)
-    # plt.show()
+    # model_name = "resnet34_GN"
+    # plot_rank_acc(model_name, OOD=True, download=True, skip_count=2)
+    # plot_rank_acc(model_name, OOD=False, download=True, skip_count=2)
+    # plot_resnet()
+    plot_mlp()
+    # plot_rank_acc(model_name, OOD=True, download=True, skip_count=2)
+    # plot_error_dimension("resnet34", 32768, original=True, download=True)
+    # plot_mlp()
+    # plot_resnet()
 
-
-# def plot_rank_acc(model_name, skip_count):
-#     singular_values = torch.load(f"values/singular_values/{model_name}.pt")
-#     ranks = get_dynamic_ranks(singular_values)
-#     accuracy = torch.load(f"values/acc/{model_name}.pt")
-
-#     x_axis = range(skip_count + 1, len(ranks) + skip_count + 1)
-
-#     tunnel_start_idx = find_tunnel_start(acc_mean) + 2
-
-#     fig, ax1 = plt.subplots(figsize=(6, 4))
-#     ax1.plot(x_axis, counts_mean, label="Ranks")
-
-#     ax1.fill_between(
-#         x_axis,
-#         counts_mean - counts_std,
-#         counts_mean + counts_std,
-#         alpha=0.2,
-#     )
-
-#     ax1.set_xlabel("Layers")
-#     ax1.set_ylabel("Ranks")
-#     ax2 = ax1.twinx()
-#     ax2.plot(x_axis, acc_mean, label="Accuracy")
-#     ax2.fill_between(
-#         x_axis,
-#         acc_mean - acc_std,
-#         acc_mean + acc_std,
-#         alpha=0.2,
-#     )
-
-#     # ax2.plot(x_axis, ood_mean, label="OOD acc")
-#     # ax2.fill_between(
-#     #     x_axis,
-#     #     ood_mean - ood_std,
-#     #     ood_mean + ood_std,
-#     #     alpha=0.2,
-#     # )
-
-#     ax2.set_ylabel("Accuracy")
-#     lines = ax1.get_lines() + ax2.get_lines()
-#     labels = [line.get_label() for line in lines]
-#     colors = ["blue", "orange", "green", "red", "purple", "brown", "pink", "gray"]
-#     for i, line in enumerate(lines):
-#         line.set_color(colors[i % len(colors)])
-#     plt.legend(lines, labels, loc="lower center")
-#     plt.xlim(left=3, right=len(counts_mean) + 2)
-#     plt.axvspan(tunnel_start_idx, len(counts_mean) + 2, alpha=0.2, color="green")
-
-#     plt.grid(axis="both")
-#     plt.savefig(f"resnet_ranks_acc", dpi=300)
-#     plt.show()
-
-
-# model_name = "mlp_300"
-# # plot_error_dimention(model_name, 32768, original=True, download=True)
-
-# # counts_mean, counts_std = get_mean_std(model_name, "counts")
-# counts_mean, counts_std = get_mean_std(model_name, "ranks")
-# acc_mean, acc_std = get_mean_std(model_name, "acc")
-# tunnel_start_idx = find_tunnel_start(acc_mean, 0.98)
-# x_axis = range(1, len(counts_mean) + 1)
-# fig, ax1 = plt.subplots(figsize=(6, 4))
-# ax1.plot(x_axis, counts_mean, label="Ranks")
-# ax1.fill_between(x_axis, counts_mean - counts_std, counts_mean + counts_std, alpha=0.2)
-# ax1.set_xlabel("Layers")
-# ax1.set_ylabel("Ranks")
-# ax2 = ax1.twinx()
-# ax2.plot(x_axis, acc_mean, label="Accuracy")
-# ax2.fill_between(
-#     x_axis,
-#     acc_mean - acc_std,
-#     acc_mean + acc_std,
-#     alpha=0.2,
-# )
-# ax2.set_ylabel("Aaccuracy")
-# lines = ax1.get_lines() + ax2.get_lines()
-# labels = [line.get_label() for line in lines]
-# colors = ["blue", "orange", "green", "red", "purple", "brown", "pink", "gray"]
-# for i, line in enumerate(lines):
-#     line.set_color(colors[i % len(colors)])
-# ax1.legend(lines, labels, loc="lower center")
-# plt.xlim(left=1, right=len(counts_mean))
-# plt.axvspan(tunnel_start_idx, len(counts_mean), alpha=0.2, color="green")
-# plt.grid(axis="both")
-# plt.savefig(f"mlp_acc_rank", dpi=300)
-# plt.show()
-
-# for i in range(4):
-# i = 0
-# model_name = f"resnet34_{i}"
-# sigs = torch.load(f"values/singular_values/{model_name}.pt")
-
-# ranks = get_dynamic_ranks(sigs)
-# plt.plot(ranks)
-# plt.show()
-# plot_resnet()
+    # model_name = "resnet34_0"
+    # acc = torch.load(f"values/acc/{model_name}.pt")
+    # print(acc)
+    # model_name = "resnet34_GN"
+    # acc = torch.load(f"values/acc/{model_name}.pt")
+    # print(acc)
