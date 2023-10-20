@@ -101,6 +101,13 @@ class Analyzer(metaclass=ABCMeta):
         print(singular_values[:10])
         self.singular_values.append(singular_values)
 
+    def inspect_layers_dim(self):
+        self.register_full_hooks()
+        self.forward(self.dummy_data)
+        for representation in self.representations:
+            print(representation.shape)
+        self.remove_hooks()
+
     def init_classifers(self):
         self.classifiers = []
         self.optimizers = []
@@ -127,7 +134,7 @@ class Analyzer(metaclass=ABCMeta):
     def download_singular_values(self, input_data):
         self.register_singular_hooks()
         self.forward(input_data)
-        torch.save(self.singular_values, f"values/singular_values/{self.name}_original_500.pt")
+        torch.save(self.singular_values, f"values/singular_values/{self.name}.pt")
         self.remove_hooks()
 
     def download_accuarcy(self, train_data_loader, test_dataloader, OOD):
