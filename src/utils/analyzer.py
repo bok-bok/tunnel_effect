@@ -65,7 +65,7 @@ class Analyzer(metaclass=ABCMeta):
         self.G = G / torch.norm(G, dim=0, keepdim=True)
 
     @abstractmethod
-    def get_layers(self) -> list[nn.Module]:
+    def get_layers(self):
         pass
 
     def register_full_hooks(self):
@@ -229,7 +229,7 @@ class ResNetAnalyzer(Analyzer):
     def __init__(self, model, model_name, dummy_input):
         super().__init__(model, model_name, dummy_input)
 
-    def get_layers(self) -> list[nn.Module]:
+    def get_layers(self):
         layers = []
         layer_count = len(list(i for i in self.model.named_modules() if isinstance(i, nn.Conv2d)))
         if layer_count > 100:
@@ -275,7 +275,7 @@ class MLPAnalyzer(Analyzer):
     def __init__(self, model, model_name, dummy_input):
         super().__init__(model, model_name, dummy_input)
 
-    def get_layers(self) -> list[nn.Module]:
+    def get_layers(self):
         layers = []
         for layer in self.model.layers:
             if isinstance(layer, nn.Linear):
