@@ -2,7 +2,7 @@ import argparse
 
 import matplotlib.pyplot as plt
 import torch
-from torchvision.models import MobileNet_V3_Large_Weights, ResNet18_Weights, resnet50
+from torchvision.models import ResNet50_Weights, resnet50
 
 from models.models import MLP, MobileV3, ResNet18, ResNet34, ResNet34_GN
 from utils.analyzer import MLPAnalyzer, ResNetAnalyzer
@@ -27,7 +27,19 @@ def get_args():
     return args
 
 
-def get_model(model_name: str, pretrained: bool = True, weights_path: str = None):
+def get_model(model_name: str, dataset: str, pretrained: bool = True, weights_path: str = None):
+    if "cifar" in dataset:
+        return get_cifar_model(model_name, pretrained, weights_path)
+    else:
+        return get_imagenet_model(model_name, weights_path)
+
+
+def get_imagenet_model(model_name, weights_path=None):
+    if "resnet50" in model_name:
+        return resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+
+
+def get_cifar_model(model_name, pretrained=True, weights_path=None):
     if "resnet18" in model_name:
         if pretrained:
             if "swav" in model_name:
