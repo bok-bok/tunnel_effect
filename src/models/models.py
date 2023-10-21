@@ -1,15 +1,8 @@
 from abc import ABCMeta, abstractmethod
 
-import lightning.pytorch as pl
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-import torchmetrics
-import torchvision
-from lightning.pytorch.utilities.types import STEP_OUTPUT
-from torch.utils.data import DataLoader
-from torchvision import models, transforms
+from torchvision import models
 
 from models.resnet_models_GN_WS import resnet34
 
