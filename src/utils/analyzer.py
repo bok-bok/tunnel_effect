@@ -27,7 +27,18 @@ def random_projection_method(X, b, normalized=False):
 class Analyzer(metaclass=ABCMeta):
     def __init__(self, model, name, dummy_input):
         self.dummy_data = dummy_input
+        self.name = name
+
+        # freeze all layers in the model
+        for param in model.parameters():
+            param.requires_grad = False
+        self.model = model
+
+        self.init_variables()
+
+    def init_variables(self):
         self.b = 8192
+
         self.singular_values = []
         self.skip_layers = False
         self.skip_numbers = 2
@@ -38,18 +49,20 @@ class Analyzer(metaclass=ABCMeta):
             if torch.backends.mps.is_available()
             else "cpu"
         )
-        self.name = name
         self.total_samples = 0
         self.hooks = []
-        for param in model.parameters():
-            param.requires_grad = False
-
-        self.model = model
-
-        self.criterion = nn.CrossEntropyLoss()
         self.representations = []
 
+        self.criterion = nn.CrossEntropyLoss()
+
         self.layers = self.get_layers()
+
+        if self.dummy_data.size(-1) > 32:
+            self.random_projection_train = True
+
+    def init_G(self, sample_size):
+        G = torch.randn(self.b, sample_size)
+        self.G = G / torch.norm(G, dim=0, keepdim=True)
 
     @abstractmethod
     def get_layers(self) -> list[nn.Module]:
@@ -58,6 +71,11 @@ class Analyzer(metaclass=ABCMeta):
     def register_full_hooks(self):
         for layer in self.layers:
             hook = layer.register_forward_hook(self.hook_full)
+            self.hooks.append(hook)
+
+    def register_random_projection_hooks(self):
+        for layer in self.layers:
+            hook = layer.register_forward_hook(self.hook_store_random_projected_embeddings)
             self.hooks.append(hook)
 
     def register_singular_hooks(self):
@@ -77,17 +95,11 @@ class Analyzer(metaclass=ABCMeta):
         self.remove_hooks()
 
     def hook_full(self, module, input, output):
-        output = self.preprocess_output(output)
+        # output = self.preprocess_output(output)
         self.representations.append(output)
 
     def hook_compute_singular_values(self, module, input, output):
         output = self.preprocess_output(output).detach().cpu().T
-        # skip dummy
-        # output = output[:8000]
-        # print(output.shape)
-        # cov_mat = torch.cov(output, correction=1)
-        # print(cov_mat.size())
-        # singular_values = torch.linalg.matrix_rank(cov_mat)
         if output.size(1) == 1:
             return
 
@@ -100,6 +112,15 @@ class Analyzer(metaclass=ABCMeta):
             singular_values = random_projection_method(output, self.b)
         print(singular_values[:10])
         self.singular_values.append(singular_values)
+
+    def hook_store_random_projected_embeddings(self, module, input, output):
+        output = self.preprocess_output(output).detach().cpu().T
+        if output.size(1) == 1:
+            return
+
+        if output.size(0) <= self.b:
+            output = torch.mm(self.G, output)
+        self.representations.append(output)
 
     def inspect_layers_dim(self):
         self.register_full_hooks()
@@ -138,7 +159,10 @@ class Analyzer(metaclass=ABCMeta):
         self.remove_hooks()
 
     def download_accuarcy(self, train_data_loader, test_dataloader, OOD):
-        self.register_full_hooks()
+        if self.random_projection_train:
+            self.register_random_projection_hooks()
+        else:
+            self.register_full_hooks()
         self.init_classifers()
         self.train_classifers(train_data_loader)
         self.test_classifers(test_dataloader, OOD)
@@ -208,7 +232,7 @@ class ResNetAnalyzer(Analyzer):
     def get_layers(self) -> list[nn.Module]:
         layers = []
         layer_count = len(list(i for i in self.model.named_modules() if isinstance(i, nn.Conv2d)))
-        if layer_count > 40:
+        if layer_count > 100:
             print("skip odd layers")
             self.skip_layers = True
             count = 0
@@ -219,12 +243,26 @@ class ResNetAnalyzer(Analyzer):
 
             print(f"new layer count {len(layers)}")
         else:
-            layers.append(self.model.resnet.conv1)
+            # check if the model is modified
+            try:
+                # if resnet exist, then the model is modified
+                self.model.resnet
+                cur_model = self.model.resnet
+            except:
+                cur_model = self.model
+            layers.append(cur_model.conv1)
             for block_name in ["layer1", "layer2", "layer3", "layer4"]:
-                block = getattr(self.model.resnet, block_name)
+                block = getattr(cur_model, block_name)
                 for layer in block:
-                    layers.extend([layer.conv1, layer.conv2])
+                    try:
+                        layer.conv3
+                        # layer_to_add = [layer.conv1, layer.conv2]
+                        layer_to_add = [layer.conv1, layer.conv2, layer.conv3]
+                    except:
+                        layer_to_add = [layer.conv1, layer.conv2]
+                    layers.extend(layer_to_add)
             print(f"new layer count {len(layers)}")
+
         return layers
 
     def preprocess_output(self, output) -> torch.FloatTensor:
