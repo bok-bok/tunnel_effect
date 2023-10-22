@@ -5,17 +5,6 @@ import torch
 from torchvision.models import ResNet50_Weights, resnet50
 
 from models.models import MLP, MobileV3, ResNet18, ResNet34, ResNet34_GN
-from utils.analyzer import MLPAnalyzer, ResNetAnalyzer
-
-
-def get_analyzer(model, model_name: str, dummy_input):
-    if "mlp" in model_name:
-        return MLPAnalyzer(model, model_name, dummy_input)
-
-    elif "resnet" in model_name:
-        return ResNetAnalyzer(model, model_name, dummy_input)
-    else:
-        raise ValueError("model name not supported")
 
 
 def get_args():
@@ -36,7 +25,12 @@ def get_model(model_name: str, dataset: str, pretrained: bool = True, weights_pa
 
 def get_imagenet_model(model_name, weights_path=None):
     if "resnet50" in model_name:
-        return resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+        if "swav" in model_name:
+            print("loading resnet50_swav")
+            return torch.hub.load("facebookresearch/swav:main", "resnet50")
+        else:
+            print("loading resnet50")
+            return resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
 
 
 def get_cifar_model(model_name, pretrained=True, weights_path=None):
@@ -81,3 +75,13 @@ def get_cifar_model(model_name, pretrained=True, weights_path=None):
     else:
         raise ValueError("model name not supported")
     return model
+
+
+def get_size(data):
+    if isinstance(data, torch.Tensor):
+        total_bytes = data.element_size() * data.numel()
+        total_gigabytes = total_bytes / (1024 * 1024 * 1024)
+    else:
+        total_gigabytes = data / (1024 * 1024 * 1024)
+    total_gigabytes = round(total_gigabytes, 2)
+    return total_gigabytes
