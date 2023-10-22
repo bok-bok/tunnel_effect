@@ -1,9 +1,12 @@
+import gc
 import time
 from abc import ABCMeta, abstractmethod
 
 import torch
 from torch import nn, optim
 from tqdm import tqdm
+
+from utils.utils import get_size
 
 
 def mean_center(X):
@@ -17,10 +20,18 @@ def random_projection_method(X, b, normalized=False):
     G = torch.randn(b, X.size(0))
     G = G / torch.norm(G, dim=0, keepdim=True)  # Normalize columns to unit length
     X_reduced = torch.mm(G, X)
+    del G
+    del X
+
+    X_reduced = X_reduced.to("cuda")
     S = torch.linalg.svdvals(X_reduced)
+    del X_reduced
+
     S_squared = S**2
     if normalized:
         S_squared = S_squared / torch.sum(S_squared)
+
+    del S
     return S_squared.detach().cpu()
 
 
@@ -28,6 +39,7 @@ class Analyzer(metaclass=ABCMeta):
     def __init__(self, model, name, dummy_input):
         self.dummy_data = dummy_input
         self.name = name
+        self.layer_num = 0
 
         # freeze all layers in the model
         for param in model.parameters():
@@ -37,7 +49,7 @@ class Analyzer(metaclass=ABCMeta):
         self.init_variables()
 
     def init_variables(self):
-        self.b = 8192
+        self.b = 13000
 
         self.singular_values = []
         self.skip_layers = False
@@ -49,6 +61,7 @@ class Analyzer(metaclass=ABCMeta):
             if torch.backends.mps.is_available()
             else "cpu"
         )
+        self.device = "cpu"
         self.total_samples = 0
         self.hooks = []
         self.representations = []
@@ -99,18 +112,28 @@ class Analyzer(metaclass=ABCMeta):
         self.representations.append(output)
 
     def hook_compute_singular_values(self, module, input, output):
-        output = self.preprocess_output(output).detach().cpu().T
+        output = self.preprocess_output(output).T
         if output.size(1) == 1:
             return
+        print(f"output shape: {output.size()}")
 
         if output.size(0) <= self.b:
             print(f"use full matrix : {output.size()}")
+            output.to("cuda")
             cov_mat = torch.cov(output, correction=1)
-            singular_values = torch.linalg.svdvals(cov_mat)
+            singular_values = torch.linalg.svdvals(cov_mat).detach().cpu()
+            del cov_mat
+
         else:
             print(f"use random projection method : {output.size()}")
             singular_values = random_projection_method(output, self.b)
+
         print(singular_values[:10])
+        # torch.save(singular_values, f"values/singular_values/{self.name}/{self.layer_num}.pt")
+        # self.layer_num += 1
+        del input
+        del output
+
         self.singular_values.append(singular_values)
 
     def hook_store_random_projected_embeddings(self, module, input, output):
@@ -122,11 +145,18 @@ class Analyzer(metaclass=ABCMeta):
             output = torch.mm(self.G, output)
         self.representations.append(output)
 
-    def inspect_layers_dim(self):
+    def inspect_layers_dim(self, sample_size=20000):
         self.register_full_hooks()
         self.forward(self.dummy_data)
         for representation in self.representations:
-            print(representation.shape)
+            dim = representation.view(representation.size(0), -1).size(1)
+            representation_bytes = representation.element_size() * dim * sample_size
+            g_bytes = representation.element_size() * dim * self.b
+            reduced_bytes = representation.element_size() * self.b * sample_size
+            total_bytes = representation_bytes + g_bytes + reduced_bytes
+            size = get_size(total_bytes)
+            print(f"layer dim: {dim}, size: {size} GB")
+
         self.remove_hooks()
 
     def init_classifers(self):
@@ -285,3 +315,13 @@ class MLPAnalyzer(Analyzer):
     def preprocess_output(self, output):
         output = output.view(output.size(0), -1)
         return output
+
+
+def get_analyzer(model, model_name: str, dummy_input):
+    if "mlp" in model_name:
+        return MLPAnalyzer(model, model_name, dummy_input)
+
+    elif "resnet" in model_name:
+        return ResNetAnalyzer(model, model_name, dummy_input)
+    else:
+        raise ValueError("model name not supported")
