@@ -2,7 +2,13 @@ import argparse
 
 import matplotlib.pyplot as plt
 import torch
-from torchvision.models import ResNet50_Weights, resnet50
+import torchvision.models
+from torchvision.models import (
+    ConvNeXt_Base_Weights,
+    ResNet50_Weights,
+    convnext_base,
+    resnet50,
+)
 
 from models.models import MLP, MobileV3, ResNet18, ResNet34, ResNet34_GN
 
@@ -23,7 +29,7 @@ def get_model(model_name: str, dataset: str, pretrained: bool = True, weights_pa
         return get_imagenet_model(model_name, weights_path)
 
 
-def get_imagenet_model(model_name, weights_path=None):
+def get_imagenet_model(model_name: str, weights_path=None):
     if "resnet50" in model_name:
         if "swav" in model_name:
             print("loading resnet50_swav")
@@ -31,6 +37,8 @@ def get_imagenet_model(model_name, weights_path=None):
         else:
             print("loading resnet50")
             return resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+    if "convnext" in model_name.lower():
+        return convnext_base(weights=ConvNeXt_Base_Weights.IMAGENET1K_V1)
 
 
 def get_cifar_model(model_name, pretrained=True, weights_path=None):

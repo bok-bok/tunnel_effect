@@ -1,4 +1,5 @@
 import gc
+import os
 import time
 from abc import ABCMeta, abstractmethod
 
@@ -40,6 +41,7 @@ class Analyzer(metaclass=ABCMeta):
         self.dummy_data = dummy_input
         self.name = name
         self.layer_num = 0
+        self.target = 11
 
         # freeze all layers in the model
         for param in model.parameters():
@@ -86,6 +88,11 @@ class Analyzer(metaclass=ABCMeta):
             hook = layer.register_forward_hook(self.hook_full)
             self.hooks.append(hook)
 
+    def register_full_temp_hooks(self):
+        for layer in self.layers:
+            hook = layer.register_forward_hook(self.hook_save_target_layer)
+            self.hooks.append(hook)
+
     def register_random_projection_hooks(self):
         for layer in self.layers:
             hook = layer.register_forward_hook(self.hook_store_random_projected_embeddings)
@@ -107,8 +114,14 @@ class Analyzer(metaclass=ABCMeta):
 
         self.remove_hooks()
 
+    def hook_save_target_layer(self, module, input, output):
+        if self.layer_num == self.target:
+            output = self.preprocess_output(output)
+            torch.save(output, f"values/representations/{self.name}/{self.target}.pt")
+        self.layer_num += 1
+
     def hook_full(self, module, input, output):
-        # output = self.preprocess_output(output)
+        output = self.preprocess_output(output)
         self.representations.append(output)
 
     def hook_compute_singular_values(self, module, input, output):
@@ -144,6 +157,11 @@ class Analyzer(metaclass=ABCMeta):
         if output.size(0) <= self.b:
             output = torch.mm(self.G, output)
         self.representations.append(output)
+
+    def download_one_representation(self, input_data):
+        # 11
+        self.register_full_temp_hooks()
+        self.forward(input_data)
 
     def inspect_layers_dim(self, sample_size=20000):
         self.register_full_hooks()
@@ -296,7 +314,8 @@ class ResNetAnalyzer(Analyzer):
         return layers
 
     def preprocess_output(self, output) -> torch.FloatTensor:
-        # current input shape is (batch_size, channels, height, width) I want (channels * height * width, batch_size)
+        print(f"output shape: {output.size()}")
+
         output = output.view(output.size(0), -1)
         return output
 
@@ -317,11 +336,38 @@ class MLPAnalyzer(Analyzer):
         return output
 
 
+class ConvNextAnalyzer(Analyzer):
+    def __init__(self, model, model_name, dummy_input):
+        super().__init__(model, model_name, dummy_input)
+
+    def extract_conv2d_from_cnblock(self, model, conv2d_layers):
+        for name, module in model.named_children():
+            if name.startswith("block"):
+                for child_name, child_module in module.named_children():
+                    if isinstance(child_module, nn.Conv2d):
+                        conv2d_layers.append(child_module)
+            else:
+                # Recurse into other child modules
+                self.extract_conv2d_from_cnblock(module, conv2d_layers)
+
+    def get_layers(self):
+        layers = []
+        self.extract_conv2d_from_cnblock(self.model, layers)
+        print(f"new layer count {len(layers)}")
+        return layers
+
+    def preprocess_output(self, output) -> torch.FloatTensor:
+        output = output.reshape(output.size(0), -1)
+        return output
+
+
 def get_analyzer(model, model_name: str, dummy_input):
     if "mlp" in model_name:
         return MLPAnalyzer(model, model_name, dummy_input)
 
     elif "resnet" in model_name:
         return ResNetAnalyzer(model, model_name, dummy_input)
+    elif "convnext" in model_name.lower():
+        return ConvNextAnalyzer(model, model_name, dummy_input)
     else:
         raise ValueError("model name not supported")
