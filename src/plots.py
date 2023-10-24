@@ -5,10 +5,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scienceplots
 import torch
-from scipy.special import expit  # This is the sigmoid function
 
 plt.style.use("science")
 
+plt.rc("text", usetex=False)  # disable LaTeX font
 os.environ["PATH"] += os.pathsep + "/Library/TeX/texbin"
 plt.rc("font", size=16, weight="bold")
 
@@ -342,20 +342,39 @@ def plot_rank_acc(model_name, OOD, download=False, skip_count=0):
     plt.show()
 
 
-if __name__ == "__main__":
-    # model_name = "resnet34_GN"
-    # plot_rank_acc(model_name, OOD=True, download=True, skip_count=2)
-    # plot_rank_acc(model_name, OOD=False, download=True, skip_count=2)
-    # plot_resnet()
-    plot_mlp()
-    # plot_rank_acc(model_name, OOD=True, download=True, skip_count=2)
-    # plot_error_dimension("resnet34", 32768, original=True, download=True)
-    # plot_mlp()
-    # plot_resnet()
+def plot_rank(model_name):
+    sigs = torch.load(f"values/singular_values/{model_name}.pt")
+    ranks = get_dynamic_ranks(model_name, sigs)
+    plt.figure(figsize=(6, 4))
+    plt.plot(ranks)
+    plt.xlabel("Layers")
+    plt.ylabel("Rank")
 
-    # model_name = "resnet34_0"
-    # acc = torch.load(f"values/acc/{model_name}.pt")
-    # print(acc)
-    # model_name = "resnet34_GN"
-    # acc = torch.load(f"values/acc/{model_name}.pt")
-    # print(acc)
+    plt.savefig(f"{model_name}_rank", dpi=300)
+
+
+if __name__ == "__main__":
+    # model_names = ["resnet50", "resnet50_swav", "convnext"]
+    # resnet50_sigs = torch.load("values/singular_values/resnet50.pt")
+    # resnet50_swav_sigs = torch.load("values/singular_values/resnet50_swav.pt")
+    # convnext_sigs = torch.load("values/singular_values/convnext.pt")
+
+    # resnet50_ranks = get_dynamic_ranks("resnet50", resnet50_sigs)
+    # swav_ranks = get_dynamic_ranks("resnet50_swav", resnet50_swav_sigs)
+    # convnext_ranks = get_dynamic_ranks("convnext", convnext_sigs)
+
+    # normalized_resnet50_ranks = resnet50_ranks / np.max(resnet50_ranks)
+    # normalized_resnt50_swav_ranks = swav_ranks / np.max(swav_ranks)
+    # normalized_convnext_ranks = convnext_ranks / np.max(convnext_ranks)
+
+    # plt.figure(figsize=(10, 8))
+    # plt.plot(normalized_resnet50_ranks, label="ResNet50")
+    # plt.plot(normalized_resnt50_swav_ranks, label="ResNet50-Swav")
+    # plt.plot(normalized_convnext_ranks, label="ConvNext")
+    # plt.legend()
+    # plt.xlabel("Layers")
+    # plt.ylabel("Rank")
+
+    # plt.savefig(f"three_models_rank", dpi=300)
+    model_name = "resnet18"
+    plot_rank(model_name)
