@@ -52,7 +52,7 @@ class Analyzer(metaclass=ABCMeta):
         self.init_variables()
 
     def init_variables(self):
-        self.b = 8192
+        self.b = 13000
 
         self.singular_values = []
         self.skip_layers = False
