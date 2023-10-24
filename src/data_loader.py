@@ -75,7 +75,7 @@ def get_ImageNet_dataloader(train_transform, test_trainsform, batch_size=512):
 
 def get_ImageNet_dataset(train_transform, test_trainsform):
     cur_dir = os.path.dirname(os.path.abspath(__file__))
-    dataset_dir = os.path.join(cur_dir, "data/ImageNet")
+    dataset_dir = os.path.join(cur_dir, "/data/datasets/ImageNet1K")
     train_dir = os.path.join(dataset_dir, "train")
     val_dir = os.path.join(dataset_dir, "val")
 
@@ -94,6 +94,7 @@ def get_imagenet_transforms():
         [
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
     )
 
@@ -101,6 +102,7 @@ def get_imagenet_transforms():
         [
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
     )
     return train_transform, test_transform
