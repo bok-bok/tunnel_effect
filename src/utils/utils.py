@@ -5,9 +5,15 @@ import torch
 import torchvision.models
 from torchvision.models import (
     ConvNeXt_Base_Weights,
+    ResNet18_Weights,
+    ResNet34_Weights,
     ResNet50_Weights,
+    Swin_B_Weights,
     convnext_base,
+    resnet18,
+    resnet34,
     resnet50,
+    swin_b,
 )
 
 from models.models import MLP, MobileV3, ResNet18, ResNet34, ResNet34_GN
@@ -26,22 +32,28 @@ def get_model(model_name: str, dataset: str, pretrained: bool = True, weights_pa
     if "cifar" in dataset:
         return get_cifar_model(model_name, pretrained, weights_path)
     else:
-        return get_imagenet_model(model_name, weights_path)
+        return get_imagenet_model(model_name)
 
 
-def get_imagenet_model(model_name: str, weights_path=None):
-    if "resnet50" in model_name:
+def get_imagenet_model(model_name: str):
+    print(f"loading {model_name} - imagenet")
+    if "resnet18" in model_name:
+        return resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+    elif "resnet34" in model_name:
+        return resnet34(weights=ResNet34_Weights.IMAGENET1K_V1)
+    elif "resnet50" in model_name:
         if "swav" in model_name:
-            print("loading resnet50_swav")
             return torch.hub.load("facebookresearch/swav:main", "resnet50")
         else:
-            print("loading resnet50")
             return resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
-    if "convnext" in model_name.lower():
+    elif "convnext" in model_name.lower():
         return convnext_base(weights=ConvNeXt_Base_Weights.IMAGENET1K_V1)
+    elif "swin" in model_name.lower():
+        return swin_b(weights=Swin_B_Weights.IMAGENET1K_V1)
 
 
 def get_cifar_model(model_name, pretrained=True, weights_path=None):
+    print(f"Loading {model_name} - cifar")
     if "resnet18" in model_name:
         if pretrained:
             if "swav" in model_name:
@@ -52,7 +64,6 @@ def get_cifar_model(model_name, pretrained=True, weights_path=None):
             model = ResNet18()
     elif "resnet50" in model_name:
         if pretrained:
-            print("loading swav model")
             model = torch.hub.load("facebookresearch/swav:main", "resnet50")
         else:
             model = resnet50()

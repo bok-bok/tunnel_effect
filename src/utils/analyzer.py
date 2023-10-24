@@ -5,6 +5,7 @@ from abc import ABCMeta, abstractmethod
 
 import torch
 from torch import nn, optim
+from torchvision.models.swin_transformer import SwinTransformerBlock
 from tqdm import tqdm
 
 from utils.utils import get_size
@@ -51,7 +52,7 @@ class Analyzer(metaclass=ABCMeta):
         self.init_variables()
 
     def init_variables(self):
-        self.b = 13000
+        self.b = 8192
 
         self.singular_values = []
         self.skip_layers = False
@@ -314,8 +315,6 @@ class ResNetAnalyzer(Analyzer):
         return layers
 
     def preprocess_output(self, output) -> torch.FloatTensor:
-        print(f"output shape: {output.size()}")
-
         output = output.view(output.size(0), -1)
         return output
 
@@ -361,6 +360,22 @@ class ConvNextAnalyzer(Analyzer):
         return output
 
 
+class SwinAnalyzer(Analyzer):
+    def __init__(self, model, model_name, dummy_input):
+        super().__init__(model, model_name, dummy_input)
+
+    def get_layers(self):
+        layers = []
+        for name, module in self.model.named_modules():
+            if isinstance(module, SwinTransformerBlock):
+                layers.append(module)
+        return layers
+
+    def preprocess_output(self, output):
+        output = output.view(output.size(0), -1)
+        return output
+
+
 def get_analyzer(model, model_name: str, dummy_input):
     if "mlp" in model_name:
         return MLPAnalyzer(model, model_name, dummy_input)
@@ -369,5 +384,8 @@ def get_analyzer(model, model_name: str, dummy_input):
         return ResNetAnalyzer(model, model_name, dummy_input)
     elif "convnext" in model_name.lower():
         return ConvNextAnalyzer(model, model_name, dummy_input)
+    elif "swin" in model_name.lower():
+        print(f"loading {model_name} analyzer")
+        return SwinAnalyzer(model, model_name, dummy_input)
     else:
         raise ValueError("model name not supported")
