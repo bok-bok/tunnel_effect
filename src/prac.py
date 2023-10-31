@@ -1,40 +1,51 @@
+import math
 import os
+import time
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker  # Import ticker module for custom formatting
 import numpy as np
-import scienceplots
 import torch
+import torch as pt
+import torch.nn.functional as F
 import torchvision
-from scipy.linalg import svd
-from scipy.sparse.linalg import svds
-from sklearn.utils.extmath import randomized_svd
+from flowtorch.analysis import SVD
+from sklearn import random_projection
 from torch import nn
 
 # from solo.backbones import resnet18
-from torchvision.models import resnet18
+from torchvision.models import resnet18, resnet34
 
-from data_loader import get_data_loader
-from utils import get_analyzer, get_model
+from data_loader import get_balanced_imagenet_input_data, get_data_loader
+from models.models import IterativeKNN
+from utils import get_model
+from utils.utils import compute_X_reduced, get_size, random_projection_method
 
 os.environ["PATH"] += os.pathsep + "/Library/TeX/texbin"
 
 
-def mean_center(X):
-    mean = torch.mean(X, dim=1, keepdim=True)
-    X_prime = X - mean
-    return X_prime
+def get_ranks(sigs, threshold):
+    ranks = []
+    for sig in sigs:
+        count = (sig > threshold).sum().item()
+        ranks.append(count)
+    return ranks
 
 
-def random_projection_method(X, b):
-    X = mean_center(X)
-    G = torch.randn(b, X.size(0))
-    G = G / torch.norm(G, dim=0, keepdim=True)  # Normalize columns to unit length
-    X_reduced = torch.mm(G, X)
-    S = torch.linalg.svdvals(X_reduced)
-    S_squared = S**2
-    S_normalized = S_squared / torch.sum(S_squared)
-    return S_normalized.detach()
+def get_dynamic_ranks(model_name, sigs):
+    model_name = model_name.split("_")[0]
+    dims = torch.load(f"values/dimensions/{model_name}.pt")
+    ranks = []
+    for i, sig in enumerate(sigs):
+        # eps = torch.finfo(torch.float32).eps * len(sig)
+        eps = torch.finfo(torch.float32).eps * dims[i]
+        # eps = torch.finfo(torch.float32).eps * 300
+
+        threshold = torch.max(sig) * eps
+        count = (sig > threshold).sum().item()
+        ranks.append(count)
+    return ranks
 
 
 def compuate_singular_values(representation):
@@ -140,15 +151,108 @@ def compute_error_original_vs_random_projection(model_name, files):
         helper(model_name, file)
 
 
-# representations_to_full_singular_values("resnet34_0")
+def compute_save_singular_values(model_name, layer):
+    representation = torch.load(f"values/representations/{model_name}/{layer}.pt").T
+    print(f"representation shape: {representation.shape}")
+    representation.to("cuda")
+    cov_mat = torch.cov(representation, correction=1)
+    print(f"cov_mat shape: {cov_mat.shape}")
+    S = torch.linalg.svdvals(cov_mat)
+    download_path = f"values/singular_values/{model_name}"
+    if not os.path.exists(download_path):
+        os.makedirs(download_path)
+    torch.save(S, f"{download_path}/{layer}.pt")
 
 
-# # compute_error_original_vs_random_projection("resnet34_0", "16_16384.pt")
-model_name = "resnet34_0"
-target_dim = "16384"
-original = True
-files = os.listdir(f"values/representations/{model_name}")
-files = [file.split(".")[0] for file in files if target_dim in file]
-files.sort(key=lambda x: int(x.split("_")[0]), reverse=True)
-# print(files)
-compute_error_original_vs_random_projection(model_name, files)
+def create_data():
+    x = pt.linspace(-10, 10, 100)
+    t = pt.linspace(0, 20, 200)
+    Xm, Tm = pt.meshgrid(x, t)
+
+    data_matrix = 5.0 / pt.cosh(0.5 * Xm) * pt.tanh(0.5 * Xm) * pt.exp(1.5j * Tm)  # primary mode
+    data_matrix += 0.5 * pt.sin(2.0 * Xm) * pt.exp(2.0j * Tm)  # secondary mode
+    data_matrix += 0.5 * pt.normal(mean=pt.zeros_like(Xm), std=pt.ones_like(Xm))
+    return data_matrix
+
+
+def median_threshold(sig, m, n):
+    # m feature
+    # n sample
+
+    beta = m / n
+    print(beta)
+    med = torch.median(sig)
+    return (0.56 * (beta**3) - 0.95 * (beta**2) + 1.82 * (beta) + 1.43) * med
+
+
+def sig_histogram(sig, layer):
+    sig = sig[:1000]
+    plt.bar(range(len(sig)), sig)
+    print(sig[0])
+    plt.xlabel(r"$i$")
+    plt.ylabel(r"$\sigma_i$")
+    plt.savefig(f"sig_histogram_{layer}.png")
+
+
+def mean_center(X):
+    mean = torch.mean(X, dim=1, keepdim=True)
+    X_prime = X - mean
+    return X_prime
+
+
+def sparse_random_projection_matrix(original_dim, target_dim):
+    # Generate sparse random projection matrix
+    prob = 1 / (2 * torch.sqrt(torch.tensor([target_dim], dtype=torch.float)))
+    s = (torch.rand(target_dim, original_dim) < prob).float()
+    signs = torch.sign(torch.randn(target_dim, original_dim))
+    G = torch.sqrt(torch.tensor([target_dim], dtype=torch.float)) * s * signs
+    return G.T
+
+
+def compute_sparesed_X_reduced(X, b):
+    X = mean_center(X)  # F x N
+    G = sparse_random_projection_matrix(b, X.size(0))  # b x F
+    print(G.shape)
+    G = G / torch.norm(G, dim=0, keepdim=True)  # Normalize columns to unit length
+    X_reduced = torch.mm(G, X)  # b x N
+    del G
+    del X
+    return X_reduced
+
+
+class AggregateSpatialInformation(nn.Module):
+    def __init__(self, target_size):
+        super(AggregateSpatialInformation, self).__init__()
+        self.target_size = target_size
+
+    def forward(self, x):
+        # Calculate the pooling size based on the target size
+        _, _, h, w = x.size()
+        pooling_size = int(h * w / self.target_size)
+        return F.avg_pool2d(x, pooling_size, stride=pooling_size)
+
+
+def vectorize_global_avg_pooling(x):
+    output = F.avg_pool2d(x, 2, stride=2)
+    flatten_output = output.view(output.size(0), -1)
+    normalized_output = F.normalize(flatten_output, p=2, dim=1)
+    return normalized_output
+
+
+def vectorize_global_max_pooling(x):
+    output = F.max_pool2d(x, 2, stride=2)
+    flatten_output = output.view(output.size(0), -1)
+    normalized_output = F.normalize(flatten_output, p=2, dim=1)
+    return normalized_output
+
+def get_dir(feature_type, normalize, knn):
+    return f"values/cifar10/{'knn_ood_acc' if knn else 'ood_acc'}/{feature_type}/model{'_norm' if normalize else ''}"
+
+if __name__ == "__main__":
+    # data = torch.randn(3, 256, 8, 8)
+
+    # avg_ = vectorize_global_avg_pooling(data)
+    # max_ = vectorize_global_max_pooling(data)
+    # concat = torch.cat((avg_, max_), dim=0)
+    # print(concat.shape)
+
