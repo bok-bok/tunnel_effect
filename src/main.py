@@ -1,9 +1,15 @@
 import ssl
+import time
 
 import torch
 
-from data_loader import get_data_loader
-from utils import get_analyzer, get_model
+from analyzer import get_analyzer
+from data_loader import (
+    get_balanced_imagenet_input_data,
+    get_cifar_input_data,
+    get_data_loader,
+)
+from utils import get_model
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -12,33 +18,64 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 if __name__ == "__main__":
     # config
-    data_name = "cifar10"
+    model_names = [
+        "resnet50",
+        "resnet50_swav",
+        "convnext",
+        "resnet34",
+        "resnet18",
+    ]
+    # _, input_loader = get_data_loader("imagenet", batch_size=15000)
+    # input_data = next(iter(input_loader))[0].to("cpu")
+
+    # input_data = get_balanced_imagenet_input_data(15000).to("cpu")
+    # print(input_data.shape)
+    model_name = "resnet34"
+
+    # data_name = "imagenet"
+    data_name = "cifar100"
     batch_size = 512
-    input_size = 1000
+    input_size = 15000
     pretrained = True
-    OOD = False
+    OOD = True
 
     train_dataloader, test_dataloader = get_data_loader(data_name, batch_size=batch_size)
-    _, input_loader = get_data_loader(data_name, batch_size=input_size)
-    model_name = f"resnet34_0"
     weight_path = f"weights/{model_name}.pth"
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
+    print(device)
 
     # use model_name and pretrained to get model
-    model = get_model(model_name, pretrained, weight_path)
+
+    model = get_model(model_name, data_name, pretrained, weight_path)
     model.to(device)
 
     # dummy input help analyzer to get the shape of output
-    if data_name == "cifar10":
-        dummy_input = torch.randn(1, 3, 32, 32).to(device)
-    else:
-        dummy_input = torch.randn(1, 3, 224, 224).to(device)
+    # print("loading data")
+    # if data_name == "cifar10":
+    #     input_data = get_cifar_input_data().to(device)
+    # elif data_name == "imagenet":
+    #     input_data = get_balanced_imagenet_input_data(input_size).to(device)
 
-    input_data = next(iter(input_loader))[0].to(device)
-    # prepare data for analyzer
+    # print(input_data.shape)
 
-    analyzer = get_analyzer(model, model_name, dummy_input)
+    # Print the results
+    # analyzer.save_dimensions()
+    # analyzer.save_flowtorch_rank(input_data)
+    # analyzer.download_singular_values(input_data)
+    # analyzer.download_cov_variances(input_data)
+    # analyzer.save_rank(input_data)
+    # feature_type = "concat"
+    # feature_types = ["concat"]
+    for i in range(3):
+        feature_type = "avg"
 
-    analyzer.save_dimensions()
-    analyzer.download_singular_values(input_data)
-    # analyzer.download_accuarcy(train_dataloader, test_dataloader, OOD)
+        start = time.time()
+        normalize = False
+        analyzer = get_analyzer(model, model_name, data_name)
+        analyzer.download_accuarcy(train_dataloader, test_dataloader, OOD, feature_type, normalize)
+        # analyzer.download_knn_accuracy(
+        #     train_dataloader, test_dataloader, OOD, feature_type, normalize
+        # )
+        end = time.time()
+        print(f"total time {feature_type} {'normalize' if normalize else ''}: {end - start}")
