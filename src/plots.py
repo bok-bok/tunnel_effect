@@ -23,21 +23,6 @@ def get_ranks(sigs, threshold):
     return ranks
 
 
-def get_dynamic_ranks(model_name, sigs):
-    model_name = model_name.split("_")[0]
-    dims = torch.load(f"values/dimensions/{model_name}.pt")
-    ranks = []
-    for i, sig in enumerate(sigs):
-        # eps = torch.finfo(torch.float32).eps * len(sig)
-        eps = torch.finfo(torch.float32).eps * dims[i]
-        # eps = torch.finfo(torch.float32).eps * 300
-
-        threshold = torch.max(sig) * eps
-        count = (sig > threshold).sum().item()
-        ranks.append(count)
-    return ranks
-
-
 def plot_x_acc(model_name, title, ranks, acc, download=False):
     fig, ax1 = plt.subplots()
     if "resnet" in model_name.lower():
@@ -342,39 +327,116 @@ def plot_rank_acc(model_name, OOD, download=False, skip_count=0):
     plt.show()
 
 
-def plot_rank(model_name):
-    sigs = torch.load(f"values/singular_values/{model_name}.pt")
-    ranks = get_dynamic_ranks(model_name, sigs)
+def get_dynamic_ranks(model_name, data_name, cov, threshold_name, square, original_dim):
+    if cov:
+        sigs_path = f"values/{data_name}/singular_values_cov/{model_name}.pt"
+        sigs = torch.load(sigs_path)
+    else:
+        sigs_path = f"values/{data_name}/singular_values_direct/{model_name}.pt"
+        sigs = torch.load(sigs_path)
+        if square:
+            sigs = [sig**2 for sig in sigs]
+
+    structure_name = model_name.split("_")[0]
+
+    dims = torch.load(f"values/{data_name}/dimensions/{structure_name}.pt")
+    variances = torch.load(f"values/{data_name}/variances/{structure_name}_cov.pt")
+    ranks = []
+    if "cifar" in data_name:
+        n = 10000
+    else:
+        n = 15000
+
+    for i, sig in enumerate(sigs):
+        # eps = torch.finfo(torch.float32).eps * dims[i]
+
+        # threshold = torch.max(sig) * eps
+        if original_dim:
+            feature_number = dims[i]
+        else:
+            feature_number = len(sig)
+        if threshold_name == "original":
+            threshold = get_original_threshold(torch.max(sig), feature_number)
+        elif threshold_name == "mp":
+            threshold = get_mp_threshold(variances[i], feature_number, n)
+        elif threshold_name == "med":
+            threshold = median_threshold(sig, feature_number, n)
+        # print(threshold, sig[-10:])
+        count = (sig > threshold).sum().item()
+        ranks.append(count)
+    return ranks
+
+
+def get_original_threshold(max_sig, dim):
+    return max_sig * torch.finfo(torch.float32).eps * dim
+
+
+def get_mp_threshold(variance, m, n):
+    # m feature
+    # n sample
+    # m / n
+    threshold = variance * (1 + np.sqrt(m / n)) ** 2
+    return threshold
+
+
+def median_threshold(sig, m, n):
+    # m feature
+    # n sample
+
+    beta = m / n
+    med = torch.median(sig)
+    return (0.56 * (beta**3) - 0.95 * (beta**2) + 1.82 * (beta)) * med
+
+
+def plot_rank(
+    model_name, data_name, cov, threshold_name="original", square=False, original_dim=False
+):
+    ranks = get_dynamic_ranks(model_name, data_name, cov, threshold_name, square, original_dim)
+
     plt.figure(figsize=(6, 4))
-    plt.plot(ranks)
+    plt.plot(range(1, len(ranks) + 1), ranks)
+    plt.title(f"{model_name} rank")
     plt.xlabel("Layers")
     plt.ylabel("Rank")
 
-    plt.savefig(f"{model_name}_rank", dpi=300)
+    save_dir = f"./plots/{'squared' if square else 'non_squared'}/{threshold_name}/{'cov' if cov else 'direct'}/{'original_dim' if original_dim else 'reduced_dim'}/"
+    print(save_dir)
+    if not os.path.exists(os.path.dirname(save_dir)):
+        os.makedirs(os.path.dirname(save_dir))
+
+    title = f"{model_name} {data_name} {threshold_name} {'cov' if cov else ''} {'original_dim' if original_dim else 'reduced_dim'} {'square' if square else 'non_squared'}"
+    plt.title(title)
+
+    plt.savefig(f"{save_dir}/{model_name}.png", dpi=300)
+    plt.close()
+
+
+def get_dir(feature_type, normalize, knn):
+    return f"values/cifar10/{'knn_ood_acc' if knn else 'ood_acc'}/{feature_type}/resnet34{'_norm' if normalize else ''}.pt"
 
 
 if __name__ == "__main__":
-    # model_names = ["resnet50", "resnet50_swav", "convnext"]
-    # resnet50_sigs = torch.load("values/singular_values/resnet50.pt")
-    # resnet50_swav_sigs = torch.load("values/singular_values/resnet50_swav.pt")
-    # convnext_sigs = torch.load("values/singular_values/convnext.pt")
+    avg = torch.load(get_dir("avg", False, False))
+    avg_norm = torch.load(get_dir("avg", True, False))
 
-    # resnet50_ranks = get_dynamic_ranks("resnet50", resnet50_sigs)
-    # swav_ranks = get_dynamic_ranks("resnet50_swav", resnet50_swav_sigs)
-    # convnext_ranks = get_dynamic_ranks("convnext", convnext_sigs)
+    max_ = torch.load(get_dir("max", False, False))
+    max_norm = torch.load(get_dir("max", True, False))
 
-    # normalized_resnet50_ranks = resnet50_ranks / np.max(resnet50_ranks)
-    # normalized_resnt50_swav_ranks = swav_ranks / np.max(swav_ranks)
-    # normalized_convnext_ranks = convnext_ranks / np.max(convnext_ranks)
+    concat = torch.load(get_dir("concat", True, False))
+    original = torch.load("values/cifar10/ood_acc/resnet34.pt")
 
-    # plt.figure(figsize=(10, 8))
-    # plt.plot(normalized_resnet50_ranks, label="ResNet50")
-    # plt.plot(normalized_resnt50_swav_ranks, label="ResNet50-Swav")
-    # plt.plot(normalized_convnext_ranks, label="ConvNext")
-    # plt.legend()
-    # plt.xlabel("Layers")
-    # plt.ylabel("Rank")
+    plt.figure(figsize=(6, 4))
+    # plt.plot(range(1, len(avg) + 1), avg, label="avg")
+    # plt.plot(range(1, len(avg_norm) + 1), avg_norm, label="avg_norm")
+    plt.plot(range(1, len(max_) + 1), max_, label="max")
+    # plt.plot(range(1, len(max_norm) + 1), max_norm, label="max_norm")
+    # plt.plot(range(1, len(concat) + 1), concat, label="concat_norm")
+    # plt.plot(range(1, len(original) + 1), original, label="original")
+    # label x axis skip by 2
+    plt.xticks(range(1, len(avg) + 1, 2), labels=[str(x) for x in range(1, len(avg) + 1, 2)])
 
-    # plt.savefig(f"three_models_rank", dpi=300)
-    model_name = "resnet18"
-    plot_rank(model_name)
+    plt.title("linear probing")
+    plt.grid()
+
+    plt.legend()
+    plt.savefig("linear.png", dpi=300)
