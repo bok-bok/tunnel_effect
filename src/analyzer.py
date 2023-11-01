@@ -48,9 +48,6 @@ class Analyzer(metaclass=ABCMeta):
         for param in model.parameters():
             param.requires_grad = False
         self.model = model
-        self.layer_num = 0
-        self.target = 11
-        self.feature_num = 0
 
         self.init_variables()
 
@@ -61,8 +58,11 @@ class Analyzer(metaclass=ABCMeta):
         else:
             self.dummy_data = torch.randn(1, 3, 224, 224)
             self.b = 13000
-        self.main_device = "cpu"
-        self.classifier_device = "cuda"
+
+        if self.data_name in ["cifar10", "imagenet"]:
+            self.OOD = False
+        elif self.data_name in ["cifar100", "places"]:
+            self.OOD = True
 
         self.singular_values = []
         self.variances = []
@@ -115,17 +115,12 @@ class Analyzer(metaclass=ABCMeta):
         output = self.preprocess_output(output)
         self.representations.append(output)
 
-    def hook_vectorization(self, vectorize_type, norm=False):
-        def hook_vectorization_helper(module, input, output):
-            if vectorize_type == "avg":
-                output = vectorize_global_avg_pooling(output, norm)
-            elif vectorize_type == "max":
-                output = vectorize_global_max_pooling(output, norm)
-            elif vectorize_type == "concat":
-                avg_ = vectorize_global_avg_pooling(output, True)
-                max_ = vectorize_global_max_pooling(output, True)
-                output = torch.cat((avg_, max_), dim=1)
+    def hook_vectorization(self, patch_size=2):
+        if self.name in ["resnet50"]:
+            patch_size = 4
 
+        def hook_vectorization_helper(module, input, output):
+            output = vectorize_global_avg_pooling(output, patch_size)
             self.representations.append(output)
 
         return hook_vectorization_helper
@@ -260,7 +255,7 @@ class Analyzer(metaclass=ABCMeta):
     def init_classifers(self):
         self.classifiers = []
         self.optimizers = []
-        self.forward(self.dummy_data)
+        self.forward(self.dummy_data.to(self.main_device))
         if "cifar" in self.data_name:
             num_classes = 10
         else:
@@ -270,7 +265,7 @@ class Analyzer(metaclass=ABCMeta):
             cur_classifier = nn.Linear(representation.size(1), num_classes)
 
             cur_optim = optim.Adam(cur_classifier.parameters(), lr=0.001)
-            cur_classifier.to("cuda")
+            cur_classifier.to(self.classifier_device)
             self.classifiers.append(cur_classifier)
             self.optimizers.append(cur_optim)
 
@@ -280,7 +275,7 @@ class Analyzer(metaclass=ABCMeta):
             cur_knn = IterativeKNN(n_neighbors=5)
             self.knns.append(cur_knn)
 
-    def check_folder(path):
+    def check_folder(self, path):
         if not os.path.exists(path):
             os.makedirs(path)
 
@@ -338,6 +333,10 @@ class Analyzer(metaclass=ABCMeta):
             hook = layer.register_forward_hook(self.hook_compute_cov_variances)
             self.hooks.append(hook)
 
+    def add_gpus(self, main_device, classifier_device):
+        self.main_device = main_device
+        self.classifier_device = classifier_device
+
     def download_cov_variances(self, input_data):
         self.register_cov_variances_hooks()
         self.forward(input_data)
@@ -371,29 +370,30 @@ class Analyzer(metaclass=ABCMeta):
             accuracies.append(knn.get_accuracy())
 
         print(f"accuracy: {accuracies}")
-        save_dir = f"values/{'cifar10' if 'cifar' in self.data_name else 'imagenet'}/{'knn_acc' if not OOD else 'knn_ood_acc'}/{feature_type}"
+        save_dir = f"values/{'cifar10' if 'cifar' in self.data_name else 'imagenet'}/{'knn_acc' if not self.OOD else 'knn_ood_acc'}/"
         self.check_folder(save_dir)
         torch.save(accuracies, f"{save_dir}/{self.name}_{'norm' if normalize else ''}.pt")
 
-    def download_accuarcy(
-        self, train_data_loader, test_dataloader, OOD, feature_type="original", normalize=False
-    ):
-        if feature_type != "original":
-            print(f"feature type: {feature_type}")
-            self.register_hooks(self.hook_vectorization(feature_type, normalize))
-        else:
-            self.register_hooks(self.hook_full)
+    def download_accuarcy(self, train_dataloader, test_dataloader):
+        # create folder
+        save_path = f"values/{'cifar10' if 'cifar' in self.data_name else 'imagenet'}/{'acc' if not self.OOD else 'ood_acc'}/{self.name}"
+        self.check_folder(save_path)
+
+        # register hooks
+        self.register_hooks(self.hook_vectorization())
+
+        # init classifiers
         self.init_classifers()
-        self.train_classifers(train_data_loader)
+        self.train_classifers(train_dataloader)
         accuracies = self.test_classifers(test_dataloader)
 
-        save_path = f"values/{'cifar10' if 'cifar' in self.data_name else 'imagenet'}/{'acc' if not OOD else 'ood_acc'}/{feature_type}"
-        self.check_folder(save_path)
-        file_path = f"{save_path}/{self.name}_{'norm' if normalize else ''}.pt"
         i = 0
+        file_path = f"{save_path}/{i}.pt"
         while os.path.exists(file_path):
             i += 1
-            file_path = f"{save_path}/{self.name}_{i}{'_norm' if normalize else ''}.pt"
+            file_path = f"{save_path}/{i}.pt"
+        print(file_path)
+
         torch.save(accuracies, file_path)
 
         self.remove_hooks()
