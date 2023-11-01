@@ -59,9 +59,8 @@ def random_projection_method(X, b, cov=False):
         return s.detach().cpu(), variance.detach().cpu()
 
 
-def vectorize_global_avg_pooling(x, normalize=False):
-    output = F.avg_pool2d(x, 2, stride=2)
-    # output = F.avg_pool2d(x, 4, stried=4)
+def vectorize_global_avg_pooling(x, patch_size=2, normalize=False):
+    output = F.avg_pool2d(x, patch_size, stride=patch_size)
     output = output.view(output.size(0), -1)
     if normalize:
         output = F.normalize(output, p=2, dim=1)
