@@ -1,37 +1,17 @@
 from abc import ABCMeta, abstractmethod
 
+import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.preprocessing import StandardScaler, normalize
 from torchvision import models
 
 from models.resnet_models_GN_WS import resnet34
 
 
-class MobileV3(nn.Module):
-    def __init__(self, device="mps", weights_path=None):
-        """ResNet34 model for CIFAR-10
-
-        Args:
-            weights_path (str): Path to pretrained weights
-            device (str): Device to load weights onto
-        """
-        super().__init__()
-        self.model = models.mobilenet_v3_large(pretrained=False)
-        in_features = self.model._modules["classifier"][-1].in_features
-        self.model._modules["classifier"][-1] = nn.Linear(in_features, 10, bias=True)
-        if weights_path:
-            print("loading model")
-            self.model.load_state_dict(torch.load(weights_path, map_location=device))
-        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-        # self.model.to(device)
-        self.model.eval()
-
-    def forward(self, x):
-        return self.model(x)
-
-
 class ResNet(nn.Module, metaclass=ABCMeta):
-    def __init__(self, device="mps", weights_path=None):
+    def __init__(self, device="cpu", weights_path=None):
         """ResNet34 model for CIFAR-10
 
         Args:
@@ -117,3 +97,50 @@ class MLP(nn.Module):
         x = x.view(x.size(0), -1)  # Flatten the input
         x = self.layers(x)
         return x
+
+
+class IterativeKNN:
+    def __init__(self, n_neighbors=5):
+        self.n_neighbors = n_neighbors
+        self.nn_model = KNeighborsClassifier(n_neighbors=self.n_neighbors)
+        self.data = None
+        self.labels = None
+        self.train_data = None
+        self.predicted_labels = None
+        self.target_labels = None
+
+    def update(self, new_data, new_labels):
+        new_data = np.array(new_data)
+        new_labels = np.array(new_labels)
+        if self.data is None:
+            self.data = new_data
+            self.labels = new_labels
+        else:
+            self.data = np.concatenate((self.data, new_data))
+            self.labels = np.concatenate((self.labels, new_labels))
+
+    def train(self):
+        self.mean = self.data.mean(axis=0)
+        self.std = self.data.std(axis=0)
+        X_train = (self.data - self.mean) / self.std
+        X_train = normalize(X_train, axis=1)
+
+        # Normalization to unit length
+        self.nn_model.fit(X_train, self.labels)
+
+    def predict(self, X, target_labels):
+        X = (X - self.mean) / self.std
+        X = normalize(X, axis=1)
+
+        labels = self.nn_model.predict(X)
+        if self.target_labels is None:
+            self.target_labels = target_labels
+        else:
+            self.target_labels = np.concatenate((self.target_labels, target_labels))
+        if self.predicted_labels is None:
+            self.predicted_labels = labels
+        else:
+            self.predicted_labels = np.concatenate((self.predicted_labels, labels))
+
+    def get_accuracy(self):
+        return np.sum(self.target_labels == self.predicted_labels) / len(self.target_labels)
