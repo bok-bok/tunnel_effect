@@ -210,7 +210,11 @@ class Analyzer(metaclass=ABCMeta):
     def save_flowtorch_rank(self, input_data):
         self.register_hooks(self.hook_flowtorch_rank)
         self.forward(input_data)
-        torch.save(self.ranks, f"values/{self.data_name}/rank/{self.name}_flowrank_1.pt")
+
+        save_path = f"values/{self.data_name}/rank"
+        self.check_folder(save_path)
+
+        torch.save(self.ranks, f"{save_path}/{self.name}_flowrank.pt")
         self.remove_hooks()
 
     def save_dimensions(self):
@@ -222,7 +226,12 @@ class Analyzer(metaclass=ABCMeta):
             print(layer.size(1))
             dims.append(layer.size(1))
         name = self.name.split("_")[0]
-        torch.save(dims, f"values/{self.data_name}/dimensions/{name}.pt")
+
+        # check is the folder exist
+        path = f"values/{self.data_name}/dimensions"
+        self.check_folder(path)
+
+        torch.save(dims, f"{path}/{name}.pt")
 
         self.remove_hooks()
 
@@ -271,6 +280,10 @@ class Analyzer(metaclass=ABCMeta):
             cur_knn = IterativeKNN(n_neighbors=5)
             self.knns.append(cur_knn)
 
+    def check_folder(path):
+        if not os.path.exists(path):
+            os.makedirs(path)
+
     @abstractmethod
     def preprocess_output(self, output) -> torch.FloatTensor:
         pass
@@ -285,14 +298,14 @@ class Analyzer(metaclass=ABCMeta):
         # self.register_singular_hooks()
         self.register_hooks(self.hook_compute_singular_values)
         self.forward(input_data)
-        if self.cov:
-            singular_save_path = f"values/{self.data_name}/singular_values_cov/{self.name}.pt"
-            variance_path = f"values/{self.data_name}/variances/{self.name}_cov.pt"
-        else:
-            singular_save_path = f"values/{self.data_name}/singular_values_direct/{self.name}.pt"
-            variance_path = f"values/{self.data_name}/variances/{self.name}.pt"
-        torch.save(self.singular_values, singular_save_path)
-        torch.save(self.variances, variance_path)
+        singular_save_path = f"values/{self.data_name}/singular_values_direct"
+        variance_path = f"values/{self.data_name}/variances"
+        self.check_folder(singular_save_path)
+        self.check_folder(variance_path)
+
+        # check is the folder exist
+        torch.save(self.singular_values, f"{singular_save_path}/{self.name}.pt")
+        torch.save(self.variances, f"{variance_path}/{self.name}.pt")
         self.remove_hooks()
 
     def hook_compute_cov_variances(self, module, input, output):
@@ -359,8 +372,7 @@ class Analyzer(metaclass=ABCMeta):
 
         print(f"accuracy: {accuracies}")
         save_dir = f"values/{'cifar10' if 'cifar' in self.data_name else 'imagenet'}/{'knn_acc' if not OOD else 'knn_ood_acc'}/{feature_type}"
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
+        self.check_folder(save_dir)
         torch.save(accuracies, f"{save_dir}/{self.name}_{'norm' if normalize else ''}.pt")
 
     def download_accuarcy(
@@ -376,8 +388,7 @@ class Analyzer(metaclass=ABCMeta):
         accuracies = self.test_classifers(test_dataloader)
 
         save_path = f"values/{'cifar10' if 'cifar' in self.data_name else 'imagenet'}/{'acc' if not OOD else 'ood_acc'}/{feature_type}"
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
+        self.check_folder(save_path)
         file_path = f"{save_path}/{self.name}_{'norm' if normalize else ''}.pt"
         i = 0
         while os.path.exists(file_path):
