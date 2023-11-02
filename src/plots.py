@@ -77,6 +77,8 @@ def find_tunnel_start(accuracies, threshold=0.95):
     # find when accuracy reach 95% final accuracy
     for idx, acc in enumerate(accuracies):
         if acc > final_acc * threshold:
+            if accuracies[idx] == final_acc:
+                return None
             return idx + 1
 
 
@@ -415,28 +417,80 @@ def get_dir(feature_type, normalize, knn):
     return f"values/cifar10/{'knn_ood_acc' if knn else 'ood_acc'}/{feature_type}/resnet34{'_norm' if normalize else ''}.pt"
 
 
-if __name__ == "__main__":
-    avg = torch.load(get_dir("avg", False, False))
-    avg_norm = torch.load(get_dir("avg", True, False))
+def get_mean_std(data_name, OOD, model_name):
+    directory = f"values/{data_name}/{'ood_acc' if OOD else 'acc'}/{model_name}"
+    files = os.listdir(directory)
+    values = [torch.load(f"{directory}/{file}") for file in files]
+    means = []
+    stds = []
+    for i in range(len(values[0])):
+        mean = np.mean([arg[i] for arg in values])
+        std = np.std([arg[i] for arg in values])
+        means.append(mean)
+        stds.append(std)
+    means = np.array(means)
+    stds = np.array(stds)
+    return means, stds
 
-    max_ = torch.load(get_dir("max", False, False))
-    max_norm = torch.load(get_dir("max", True, False))
 
-    concat = torch.load(get_dir("concat", True, False))
-    original = torch.load("values/cifar10/ood_acc/resnet34.pt")
+model_name_convert = {
+    "resnet34": "ResNet34",
+    "resnet50": "ResNet50",
+    "convnext": "ConvNext",
+    "swin": "Swin Transformer",
+}
+
+
+def plot_acc(data_name, model_name):
+    ood_means, ood_stds = get_mean_std(data_name, True, model_name)
+    id_means, id_stds = get_mean_std(data_name, False, model_name)
+    tunnel_start = find_tunnel_start(id_means)
 
     plt.figure(figsize=(6, 4))
-    # plt.plot(range(1, len(avg) + 1), avg, label="avg")
-    # plt.plot(range(1, len(avg_norm) + 1), avg_norm, label="avg_norm")
-    plt.plot(range(1, len(max_) + 1), max_, label="max")
-    # plt.plot(range(1, len(max_norm) + 1), max_norm, label="max_norm")
-    # plt.plot(range(1, len(concat) + 1), concat, label="concat_norm")
-    # plt.plot(range(1, len(original) + 1), original, label="original")
-    # label x axis skip by 2
-    plt.xticks(range(1, len(avg) + 1, 2), labels=[str(x) for x in range(1, len(avg) + 1, 2)])
+    if len(ood_means) > 40:
+        plt.xticks(
+            range(1, len(ood_means) + 1, 3),
+            labels=[str(x) for x in range(1, len(ood_means) + 1, 3)],
+        )
+    elif len(ood_means) > 20:
+        plt.xticks(
+            range(1, len(ood_means) + 1, 2),
+            labels=[str(x) for x in range(1, len(ood_means) + 1, 2)],
+        )
+    else:
+        plt.xticks(
+            range(1, len(ood_means) + 1), labels=[str(x) for x in range(1, len(ood_means) + 1)]
+        )
+    ID_data_name = "ImageNet-1K" if data_name == "imagenet" else "CIFAR-10"
+    OOD_data_name = "Places-365" if data_name == "imagenet" else "CIFAR-100"
 
-    plt.title("linear probing")
+    plt.plot(range(1, len(ood_means) + 1), ood_means, label=f"OOD({OOD_data_name})")
+    plt.fill_between(
+        range(1, len(ood_means) + 1), ood_means - ood_stds, ood_means + ood_stds, alpha=0.2
+    )
+
+    plt.plot(range(1, len(id_means) + 1), id_means, label=f"ID({ID_data_name})")
+
+    # add best accuracy on y axis y ticks
+    plt.yticks(list(plt.yticks()[0]) + [max(id_means)])
+    plt.fill_between(range(1, len(id_means) + 1), id_means - id_stds, id_means + id_stds, alpha=0.2)
+    if tunnel_start is not None:
+        plt.axvspan(tunnel_start, len(ood_means), alpha=0.2, color="green")
+
+    plt.ylabel("Top-1 Accuracy[%]")
+    plt.xlabel(f"{model_name_convert[model_name]} Layer")
+    plt.xlim(left=1, right=len(ood_means))
+
     plt.grid()
 
+    # plt.title(f"{model_name}")
     plt.legend()
-    plt.savefig("linear.png", dpi=300)
+    plt.savefig(f"{model_name}_{data_name}.png", dpi=300)
+
+
+if __name__ == "__main__":
+    plot_acc("imagenet", "resnet50")
+    # plot_acc("cifar10", "resnet34")
+    # ood_acc = torch.load(f"values/imagenet/acc/resnet50/1.pt")
+
+    # print(ood_acc)
