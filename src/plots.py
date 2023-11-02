@@ -436,12 +436,13 @@ def get_mean_std(data_name, OOD, model_name):
 model_name_convert = {
     "resnet34": "ResNet34",
     "resnet50": "ResNet50",
+    "resnet50_swav": "ResNet50 Swav",
     "convnext": "ConvNext",
     "swin": "Swin Transformer",
 }
 
 
-def plot_acc(data_name, model_name):
+def plot_acc(data_name, model_name, add_title=False):
     ood_means, ood_stds = get_mean_std(data_name, True, model_name)
     id_means, id_stds = get_mean_std(data_name, False, model_name)
     tunnel_start = find_tunnel_start(id_means)
@@ -472,7 +473,30 @@ def plot_acc(data_name, model_name):
     plt.plot(range(1, len(id_means) + 1), id_means, label=f"ID({ID_data_name})")
 
     # add best accuracy on y axis y ticks
-    plt.yticks(list(plt.yticks()[0]) + [max(id_means)])
+    # if best accuracy is overlap with last y tick, remove last y tick
+    # Get current y-ticks
+    yticks = list(plt.yticks()[0])
+
+    # Add best accuracy to y-ticks
+    yticks.append(max(id_means))
+
+    # Sort the y-ticks
+    yticks = sorted(yticks)
+    # print(yticks)
+
+    for i in range(len(yticks) - 1):
+        if abs(yticks[i] - yticks[i + 1]) < 2:
+            yticks[i] = 0
+    # Check and remove overlapping y-ticks
+    # if (
+    #     len(yticks) > 1 and abs(yticks[-1] - yticks[-2]) < 2
+    # ):  # you might adjust the threshold (0.01) as needed
+    #     yticks = yticks[:-2] + [yticks[-1]]
+
+    # Set the y-ticks
+    plt.yticks(yticks)
+
+    # plt.yticks(list(plt.yticks()[0]) + [max(id_means)])
     plt.fill_between(range(1, len(id_means) + 1), id_means - id_stds, id_means + id_stds, alpha=0.2)
     if tunnel_start is not None:
         plt.axvspan(tunnel_start, len(ood_means), alpha=0.2, color="green")
@@ -482,14 +506,19 @@ def plot_acc(data_name, model_name):
     plt.xlim(left=1, right=len(ood_means))
 
     plt.grid()
-
-    # plt.title(f"{model_name}")
     plt.legend()
-    plt.savefig(f"{model_name}_{data_name}.png", dpi=300)
+    if add_title:
+        plt.title(f"{model_name_convert[model_name]} - {data_name}")
+        plt.savefig(f"{model_name}_{data_name}_title.png", dpi=300)
+    else:
+        plt.savefig(f"{model_name}_{data_name}.png", dpi=300)
 
 
 if __name__ == "__main__":
-    plot_acc("imagenet", "resnet50")
+    models = ["resnet50_swav", "convnext"]
+    for model in models:
+        plot_acc("imagenet", model)
+        plot_acc("imagenet", model, True)
     # plot_acc("cifar10", "resnet34")
     # ood_acc = torch.load(f"values/imagenet/acc/resnet50/1.pt")
 
