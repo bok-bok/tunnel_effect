@@ -116,8 +116,9 @@ class Analyzer(metaclass=ABCMeta):
         self.representations.append(output)
 
     def hook_vectorization(self, patch_size=2):
-        if self.name in ["resnet50"]:
+        if self.data_name in ["places", "imagenet"]:
             patch_size = 4
+        print(f"patch size: {patch_size}")
 
         def hook_vectorization_helper(module, input, output):
             output = vectorize_global_avg_pooling(output, patch_size)
