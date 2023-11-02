@@ -8,12 +8,11 @@ from torchvision import datasets, transforms
 
 PLACE_DIR = "/data/datasets/Places/places365_standard/small_easyformat"
 IMAGENET_DIR = "/data/datasets/ImageNet1K"
+IMAGENET_DIR = "/data/datasets/ImageNet2012"
 DIR_DICT = {"places": PLACE_DIR, "imagenet": IMAGENET_DIR}
 
 
 def get_data_loader(dataset_name, batch_size=512):
-    train_samples_per_class = 100
-    test_samples_per_class = 50
     if "cifar" in dataset_name:
         train_transform, test_transform = get_CIFAR_transforms()
         if "100" in dataset_name:
@@ -22,7 +21,11 @@ def get_data_loader(dataset_name, batch_size=512):
             return get_CIFAR_data_loader(train_transform, test_transform, batch_size)
     elif dataset_name == "imagenet" or dataset_name == "places":
         if dataset_name == "places":
+            train_samples_per_class = 100
             test_samples_per_class = 100
+        else:
+            train_samples_per_class = 200
+            test_samples_per_class = 50
         data_loader = get_balanced_dataloader(
             dataset_name, train_samples_per_class, test_samples_per_class, batch_size
         )
@@ -55,9 +58,9 @@ def get_CIFAR_100_data_loader(train_transform, test_transform, batch_size=512, u
             i for i in range(len(train_dataset)) if train_dataset.targets[i] in classes
         ]
         test_indices = [i for i in range(len(test_dataset)) if test_dataset.targets[i] in classes]
-        torch.save(train_indices, "values/cifar10/indices/train_indices.pt")
-        torch.save(test_indices, "values/cifar10/indices/test_indices.pt")
-        torch.save(classes, "values/cifar10/indices/classes.pt")
+        # torch.save(train_indices, "values/cifar10/indices/train_indices.pt")
+        # torch.save(test_indices, "values/cifar10/indices/test_indices.pt")
+        # torch.save(classes, "values/cifar10/indices/classes.pt")
 
     class_mapping = {original: new for new, original in enumerate(classes)}
     # Update the targets in train_dataset and test_dataset to the new labels
@@ -163,18 +166,19 @@ def get_balanced_indices(dataset, dataset_name, dataset_type, samples_per_class=
         print(f"loading saved {dataset_name} balanced indices")
         return torch.load(file_dir)
 
-    # create new file if not exists
     if dataset_type not in ["train", "val"]:
         raise ValueError("dataset_type must be train or val")
 
+    # create new file if not exists
     # get indices
+    print("creating new indices")
     indices = []
     for class_idx in range(num_classes):
         class_indices = np.where(np.array(dataset.targets) == class_idx)[0]
         class_sample_indices = np.random.choice(class_indices, samples_per_class, replace=False)
 
         indices.extend(class_sample_indices)
-    save_path = f"values/{dataset_name}/indices/{dataset_type}_{num_classes}_{samples_per_class}.pt"
+    save_path = f"{save_dir}/{dataset_type}_{num_classes}_{samples_per_class}.pt"
     torch.save(indices, save_path)
     return indices
 
@@ -245,4 +249,4 @@ def get_CIFAR_transforms():
 
 if __name__ == "__main__":
     _, _ = get_data_loader("imagenet", batch_size=512)
-    _, _ = get_data_loader("places", batch_size=512)
+    # _, _ = get_data_loader("places", batch_size=512)
