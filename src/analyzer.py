@@ -184,6 +184,25 @@ class Analyzer(metaclass=ABCMeta):
         self.variances.append(variance)
         self.singular_values.append(singular_values)
 
+    def hook_compute_flowtorch_cov_singular_values_and_ranks(self, module, input, output):
+        output = self.preprocess_output(output).T
+        if output.size(1) == 1:
+            return
+        print(f"output shape: {output.size()}")
+
+        # random select 8000 samples
+        random_indices = torch.randperm(output.size(0))[:8000]
+        output = torch.index_select(output, 0, random_indices)
+        # cov_matrix
+        cov_mat = torch.cov(output, correction=1)
+        svd = SVD(cov_mat, cov_mat.shape[0])
+        rank = svd.opt_rank
+        singular_values = svd.s
+        print(f"rank: {rank}")
+        print(len(singular_values))
+        self.ranks.append(rank)
+        self.singular_values.append(singular_values)
+
     def hook_store_random_projected_embeddings(self, module, input, output):
         output = self.preprocess_output(output).detach().cpu().T
         if output.size(1) == 1:
@@ -203,14 +222,17 @@ class Analyzer(metaclass=ABCMeta):
         print(f"rank: {rank}")
         self.ranks.append(rank)
 
-    def save_flowtorch_rank(self, input_data):
-        self.register_hooks(self.hook_flowtorch_rank)
+    def save_flowtorch_rank_singular_values(self, input_data):
+        self.register_hooks(self.hook_compute_flowtorch_cov_singular_values_and_ranks)
         self.forward(input_data)
 
-        save_path = f"values/{self.data_name}/rank"
-        self.check_folder(save_path)
+        rank_save_path = f"values/{self.data_name}/rank"
+        singular_values_save_path = f"values/{self.data_name}/singular_values"
+        self.check_folder(singular_values_save_path)
+        self.check_folder(rank_save_path)
 
-        torch.save(self.ranks, f"{save_path}/{self.name}_flowrank.pt")
+        torch.save(self.ranks, f"{rank_save_path}/{self.name}.pt")
+        torch.save(self.singular_values, f"{singular_values_save_path}/{self.name}.pt")
         self.remove_hooks()
 
     def save_dimensions(self):
