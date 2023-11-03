@@ -241,7 +241,7 @@ class Analyzer(metaclass=ABCMeta):
     def inspect_layers_dim(self, sample_size=15000):
         # self.register_full_hooks()
         self.register_hooks(self.hook_full)
-        self.forward(self.dummy_data)
+        self.forward(self.dummy_data.to(self.main_device))
         for representation in self.representations:
             dim = representation.view(representation.size(0), -1).size(1)
             representation_bytes = representation.element_size() * dim * sample_size
@@ -377,7 +377,7 @@ class Analyzer(metaclass=ABCMeta):
 
     def download_accuarcy(self, train_dataloader, test_dataloader):
         # create folder
-        save_path = f"values/{'cifar10' if 'cifar' in self.data_name else 'imagenet'}/{'acc' if not self.OOD else 'ood_acc'}/{self.name}"
+        save_path = f"values/{'cifar10' if 'cifar' in self.data_name else 'imagenet'}/{'acc' if not self.OOD else f'ood_acc/{self.data_name}'}/{self.name}"
         self.check_folder(save_path)
 
         # register hooks
@@ -524,6 +524,22 @@ class ConvNextAnalyzer(Analyzer):
         return output
 
 
+class ConvNextV2Analyzer(Analyzer):
+    def __init__(self, model, model_name, data_name):
+        super().__init__(model, model_name, data_name)
+
+    def get_layers(self):
+        layers = []
+        for name, module in self.model.named_modules():
+            if isinstance(module, nn.Conv2d):
+                layers.append(module)
+        return layers
+
+    def preprocess_output(self, output) -> torch.FloatTensor:
+        output = output.reshape(output.size(0), -1)
+        return output
+
+
 class SwinAnalyzer(Analyzer):
     def __init__(self, model, model_name, data_name):
         super().__init__(model, model_name, data_name)
@@ -540,16 +556,39 @@ class SwinAnalyzer(Analyzer):
         return output
 
 
+class DINOV2Analyzer(Analyzer):
+    def __init__(self, model, model_name, data_name):
+        super().__init__(model, model_name, data_name)
+
+    def get_layers(self):
+        layers = []
+        for name, module in self.model.named_modules():
+            if "NestedTensorBlock" in str(
+                type(module)
+            ):  # checking the type of the module by its string representation
+                layers.append(module)
+        return layers
+
+    def preprocess_output(self, output):
+        output = output.view(output.size(0), -1)
+        return output
+
+
 def get_analyzer(model, model_name: str, dummy_input):
     if "mlp" in model_name:
         return MLPAnalyzer(model, model_name, dummy_input)
 
     elif "resnet" in model_name:
         return ResNetAnalyzer(model, model_name, dummy_input)
+    elif "convnextv2" in model_name.lower():
+        return ConvNextV2Analyzer(model, model_name, dummy_input)
     elif "convnext" in model_name.lower():
         return ConvNextAnalyzer(model, model_name, dummy_input)
     elif "swin" in model_name.lower():
         print(f"loading {model_name} analyzer")
         return SwinAnalyzer(model, model_name, dummy_input)
+    elif "dinov2" in model_name.lower():
+        print(f"loading {model_name} analyzer")
+        return DINOV2Analyzer(model, model_name, dummy_input)
     else:
         raise ValueError("model name not supported")

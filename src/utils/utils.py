@@ -17,7 +17,7 @@ from torchvision.models import (
     swin_b,
 )
 
-from models.models import MLP, ResNet18, ResNet34, ResNet34_GN
+from models.models import MLP, ResNet18, ResNet34, ResNet34_GN, convnextv2_fcmae
 
 
 def mean_center(X):
@@ -104,10 +104,16 @@ def get_imagenet_model(model_name: str):
         else:
             print("loading resnet50 model")
             return resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+    elif "convnextv2" in model_name.lower():
+        print("loading convnextv2 model")
+        return convnextv2_fcmae()
+
     elif "convnext" in model_name.lower():
         return convnext_base(weights=ConvNeXt_Base_Weights.IMAGENET1K_V1)
     elif "swin" in model_name.lower():
         return swin_b(weights=Swin_B_Weights.IMAGENET1K_V1)
+    elif "dinov2" in model_name.lower():
+        return torch.hub.load("facebookresearch/dinov2", "dinov2_vits14")
 
 
 def get_cifar_model(model_name, pretrained=True, weights_path=None):
