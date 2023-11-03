@@ -33,60 +33,22 @@ def parser():
 
 
 if __name__ == "__main__":
-    # config
-    model_names = [
-        "resnet50",
-        "resnet50_swav",
-        "convnext",
-        "resnet34",
-        "resnet18",
-    ]
-    # _, input_loader = get_data_loader("imagenet", batch_size=15000)
-    # input_data = next(iter(input_loader))[0].to("cpu")
-
-    # input_data = get_balanced_imagenet_input_data(15000).to("cpu")
-    # print(input_data.shape)
     model_name, data_name, batch_size, main_device, classifier_device = parser()
-    # model_name = "resnet34"
-
-    # data_name = "imagenet"
-    # data_name = "places"
-    # data_name = "cifar10"
-    # batch_size = 512
-    # input_size = 15000
     pretrained = True
 
     weight_path = f"weights/{model_name}.pth"
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # device = torch.device("cpu")
 
     # use model_name and pretrained to get model
 
     model = get_model(model_name, data_name, pretrained, weight_path)
     model.to(main_device)
 
-    # dummy input help analyzer to get the shape of output
-    # print("loading data")
-    # if data_name == "cifar10":
-    #     input_data = get_cifar_input_data().to(device)
-    # elif data_name == "imagenet":
-    #     input_data = get_balanced_imagenet_input_data(input_size).to(device)
-
-    # print(input_data.shape)
-
-    # Print the results
-    # analyzer.save_dimensions()
-    # analyzer.save_flowtorch_rank(input_data)
-    # analyzer.download_singular_values(input_data)
-    # analyzer.download_cov_variances(input_data)
-    # analyzer.save_rank(input_data)
-    # feature_type = "concat"
-    # feature_types = ["concat"]
     train_dataloader, test_dataloader = get_data_loader(data_name, batch_size=batch_size)
 
     start = time.time()
     analyzer = get_analyzer(model, model_name, data_name)
     analyzer.add_gpus(main_device, classifier_device)
     analyzer.download_accuarcy(train_dataloader, test_dataloader)
+    # analyzer.inspect_layers_dim()
     end = time.time()
     print(f"total time  : {end - start}")

@@ -498,8 +498,8 @@ def plot_acc(data_name, model_name, add_title=False):
 
     # plt.yticks(list(plt.yticks()[0]) + [max(id_means)])
     plt.fill_between(range(1, len(id_means) + 1), id_means - id_stds, id_means + id_stds, alpha=0.2)
-    if tunnel_start is not None:
-        plt.axvspan(tunnel_start, len(ood_means), alpha=0.2, color="green")
+    # if tunnel_start is not None:
+    #     plt.axvspan(tunnel_start, len(ood_means), alpha=0.2, color="green")
 
     plt.ylabel("Top-1 Accuracy[%]")
     plt.xlabel(f"{model_name_convert[model_name]} Layer")
@@ -515,7 +515,7 @@ def plot_acc(data_name, model_name, add_title=False):
 
 
 if __name__ == "__main__":
-    models = ["resnet50_swav", "convnext"]
+    models = ["swin"]
     for model in models:
         plot_acc("imagenet", model)
         plot_acc("imagenet", model, True)

@@ -1,6 +1,7 @@
 import math
 import os
 import time
+from collections import OrderedDict
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -12,13 +13,15 @@ import torch.nn.functional as F
 import torchvision
 from flowtorch.analysis import SVD
 from sklearn import random_projection
+from timm.models.layers import trunc_normal_
 from torch import nn
 
 # from solo.backbones import resnet18
 from torchvision.models import resnet18, resnet34
+from tqdm import tqdm
 
 from data_loader import get_balanced_imagenet_input_data, get_data_loader
-from models.models import IterativeKNN
+from models.models import IterativeKNN, convnextv2_fcmae
 from utils import get_model
 from utils.utils import compute_X_reduced, get_size, random_projection_method
 
@@ -245,14 +248,52 @@ def vectorize_global_max_pooling(x):
     normalized_output = F.normalize(flatten_output, p=2, dim=1)
     return normalized_output
 
+
 def get_dir(feature_type, normalize, knn):
     return f"values/cifar10/{'knn_ood_acc' if knn else 'ood_acc'}/{feature_type}/model{'_norm' if normalize else ''}"
 
+
+def test_model(model):
+    _, test_loader = get_data_loader("imagenet", batch_size=32)
+    # get acc on test:
+    model.eval()
+    model.to("cuda:0")
+    correct = 0
+    total = 0
+    for data, target in tqdm(test_loader):
+        data, target = data.to("cuda:0"), target.to("cuda:0")
+        output = model(data)
+        pred = output.argmax(dim=1, keepdim=True)
+        correct += pred.eq(target.view_as(pred)).sum().item()
+        total += len(data)
+    print(f"test acc: {correct/total}")
+
+
+def extract_conv2d_layers(model):
+    conv_layers = []
+
+    for name, module in model.named_children():
+        if isinstance(module, torch.nn.Conv2d):
+            conv_layers.append(module)
+        else:
+            # Dive deeper into nested children
+            for sub_name, sub_module in module.named_children():
+                if isinstance(sub_module, torch.nn.Conv2d):
+                    conv_layers.append(sub_module)
+
+    return conv_layers
+
+
 if __name__ == "__main__":
-    # data = torch.randn(3, 256, 8, 8)
-
-    # avg_ = vectorize_global_avg_pooling(data)
-    # max_ = vectorize_global_max_pooling(data)
-    # concat = torch.cat((avg_, max_), dim=0)
-    # print(concat.shape)
-
+    # model = convnextv2_fcmae()
+    # layers = []
+    # for name, module in model.named_modules():
+    #     if isinstance(module, nn.Conv2d):
+    #         layers.append(module)
+    # print(layers)
+    # # conv_layers = extract_conv2d_layers(model)
+    # # print(conv_layers)
+    dinov2_1 = torch.load("values/imagenet/ood_acc/places/dinov2/0.pt")
+    dinov2_2 = torch.load("values/imagenet/ood_acc/places/dinov2/1.pt")
+    print(dinov2_1)
+    print(dinov2_2)
