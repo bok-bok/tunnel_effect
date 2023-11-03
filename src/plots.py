@@ -417,8 +417,12 @@ def get_dir(feature_type, normalize, knn):
     return f"values/cifar10/{'knn_ood_acc' if knn else 'ood_acc'}/{feature_type}/resnet34{'_norm' if normalize else ''}.pt"
 
 
-def get_mean_std(data_name, OOD, model_name):
-    directory = f"values/{data_name}/{'ood_acc' if OOD else 'acc'}/{model_name}"
+def get_mean_std(data_name, specific_name, model_name):
+    # set OOD or ID
+    OOD = False if data_name == specific_name else True
+
+    # add specific name to directory if OOD
+    directory = f"values/{data_name}/{f'ood_acc/{specific_name}' if OOD else 'acc'}/{model_name}"
     files = os.listdir(directory)
     values = [torch.load(f"{directory}/{file}") for file in files]
     means = []
@@ -439,12 +443,21 @@ model_name_convert = {
     "resnet50_swav": "ResNet50 Swav",
     "convnext": "ConvNext",
     "swin": "Swin Transformer",
+    "dinov2": "DINOv2",
+}
+
+data_name_convert = {
+    "cifar10": "CIFAR-10",
+    "cifar100": "CIFAR-100",
+    "imagenet": "ImageNet-1K",
+    "places": "Places-365",
 }
 
 
-def plot_acc(data_name, model_name, add_title=False):
-    ood_means, ood_stds = get_mean_std(data_name, True, model_name)
-    id_means, id_stds = get_mean_std(data_name, False, model_name)
+def plot_acc(ID_data_name, OOD_data_name, model_name, add_title=False):
+    # get mean and std for ID and OOD
+    ood_means, ood_stds = get_mean_std(ID_data_name, OOD_data_name, model_name)
+    id_means, id_stds = get_mean_std(ID_data_name, ID_data_name, model_name)
     tunnel_start = find_tunnel_start(id_means)
 
     plt.figure(figsize=(6, 4))
@@ -462,8 +475,8 @@ def plot_acc(data_name, model_name, add_title=False):
         plt.xticks(
             range(1, len(ood_means) + 1), labels=[str(x) for x in range(1, len(ood_means) + 1)]
         )
-    ID_data_name = "ImageNet-1K" if data_name == "imagenet" else "CIFAR-10"
-    OOD_data_name = "Places-365" if data_name == "imagenet" else "CIFAR-100"
+    ID_data_name = data_name_convert[ID_data_name]
+    OOD_data_name = data_name_convert[OOD_data_name]
 
     plt.plot(range(1, len(ood_means) + 1), ood_means, label=f"OOD({OOD_data_name})")
     plt.fill_between(
@@ -508,17 +521,19 @@ def plot_acc(data_name, model_name, add_title=False):
     plt.grid()
     plt.legend()
     if add_title:
-        plt.title(f"{model_name_convert[model_name]} - {data_name}")
-        plt.savefig(f"{model_name}_{data_name}_title.png", dpi=300)
+        plt.title(f"{model_name_convert[model_name]} - {ID_data_name}")
+        plt.savefig(f"{model_name}_{ID_data_name}_title.png", dpi=300)
     else:
-        plt.savefig(f"{model_name}_{data_name}.png", dpi=300)
+        plt.savefig(f"{model_name}_{ID_data_name}.png", dpi=300)
 
 
 if __name__ == "__main__":
-    models = ["swin"]
+    models = ["dinov2"]
+    ID_data_name = "imagenet"
+    OOD_data_name = "places"
     for model in models:
-        plot_acc("imagenet", model)
-        plot_acc("imagenet", model, True)
+        plot_acc(ID_data_name, OOD_data_name, model)
+        plot_acc(ID_data_name, OOD_data_name, model, True)
     # plot_acc("cifar10", "resnet34")
     # ood_acc = torch.load(f"values/imagenet/acc/resnet50/1.pt")
 
