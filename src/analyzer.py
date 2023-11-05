@@ -6,6 +6,7 @@ from abc import ABCMeta, abstractmethod
 import numpy as np
 import torch
 from flowtorch.analysis import SVD
+from timm.models.vision_transformer import Block
 from torch import nn, optim
 from torchvision.models.swin_transformer import SwinTransformerBlock
 from tqdm import tqdm
@@ -21,22 +22,15 @@ from utils.utils import (
 )
 
 
-def random_projection_method(X, b, cov=False):
+def random_projection_method(X, b):
     X_reduced = compute_X_reduced(X, b).to("cuda")
 
     variance = torch.var(X_reduced)
 
-    if not cov:
-        s = torch.linalg.svdvals(X_reduced)
-        del X_reduced
+    squared_s = torch.linalg.svdvals(X_reduced) ** 2
+    del X_reduced
 
-        return s.detach().cpu(), variance.detach().cpu()
-    else:
-        cov_mat = torch.cov(X_reduced, correction=1)
-        print(f"cov_mat shape: {cov_mat.size()}")
-        del X_reduced
-        s = torch.linalg.svdvals(cov_mat)
-        return s.detach().cpu(), variance.detach().cpu()
+    return squared_s.detach().cpu(), variance.detach().cpu()
 
 
 class Analyzer(metaclass=ABCMeta):
@@ -152,31 +146,7 @@ class Analyzer(metaclass=ABCMeta):
             del cov_mat
         else:
             print(f"use random projection method : {output.size()}")
-            singular_values, variance = random_projection_method(output, self.b, self.cov)
-
-        print(singular_values[:10])
-        del input
-        del output
-        self.variances.append(variance)
-        self.singular_values.append(singular_values)
-
-    def hook_compute_correlation_singular_values(self, module, input, output):
-        output = self.preprocess_output(output).T
-        if output.size(1) == 1:
-            return
-        print(f"output shape: {output.size()}")
-        d = output.size(0)
-        N = output.size(1)
-        if d <= N:
-            print(f"use full matrix : {output.size()}")
-            output.to("cuda")
-            cov_mat = torch.cov(output, correction=1)
-            variance = torch.var(output)
-            singular_values = torch.linalg.svdvals(cov_mat).detach().cpu()
-            del cov_mat
-        else:
-            print(f"use random projection method : {output.size()}")
-            singular_values, variance = random_projection_method(output, self.b, self.cov)
+            singular_values, variance = random_projection_method(output, self.b)
 
         print(singular_values[:10])
         del input
@@ -203,36 +173,38 @@ class Analyzer(metaclass=ABCMeta):
         self.ranks.append(rank)
         self.singular_values.append(singular_values)
 
-    def hook_store_random_projected_embeddings(self, module, input, output):
-        output = self.preprocess_output(output).detach().cpu().T
-        if output.size(1) == 1:
-            return
-
-        if output.size(0) <= self.b:
-            output = torch.mm(self.G, output)
-        self.representations.append(output)
-
-    def hook_flowtorch_rank(self, module, input, output):
-        output = self.preprocess_output(output).detach().cpu().T
+    def hook_flowtorch_direct_singular_values_ranks(self, module, input, output):
+        # output = self.preprocess_output(output).detach().cpu().T
+        output = self.preprocess_output(output).T
         if output.size(1) == 1:
             return
         print(f"use random projection method : {output.size()}")
-        X_reduced = compute_X_reduced(output, self.b).to("cuda")
-        rank = SVD(X_reduced).rank
+        X_reduced = compute_X_reduced(output, self.b)
+        print(f"X_reduced shape: {X_reduced.size()}")
+        svd = SVD(X_reduced, X_reduced.shape[0])
+        rank = svd.opt_rank
+        singular_values = svd.s
         print(f"rank: {rank}")
-        self.ranks.append(rank)
+        print(len(singular_values))
 
-    def save_flowtorch_rank_singular_values(self, input_data):
-        self.register_hooks(self.hook_compute_flowtorch_cov_singular_values_and_ranks)
+        self.ranks.append(rank)
+        self.singular_values.append(singular_values)
+
+    def save_flowtorch_rank_singular_values(self, input_data, direct=True):
+        if not direct:
+            self.register_hooks(self.hook_compute_flowtorch_cov_singular_values_and_ranks)
+        else:
+            print("direct method")
+            self.register_hooks(self.hook_flowtorch_direct_singular_values_ranks)
         self.forward(input_data)
 
         rank_save_path = f"values/{self.data_name}/rank"
         singular_values_save_path = f"values/{self.data_name}/singular_values"
         self.check_folder(singular_values_save_path)
         self.check_folder(rank_save_path)
-
-        torch.save(self.ranks, f"{rank_save_path}/{self.name}.pt")
-        torch.save(self.singular_values, f"{singular_values_save_path}/{self.name}.pt")
+        additional = "_direct" if direct else ""
+        torch.save(self.ranks, f"{rank_save_path}/{self.name}{additional}.pt")
+        torch.save(self.singular_values, f"{singular_values_save_path}/{self.name}{additional}.pt")
         self.remove_hooks()
 
     def save_dimensions(self):
@@ -312,14 +284,21 @@ class Analyzer(metaclass=ABCMeta):
         self.representations = []
         _ = self.model(input)
 
-    def download_singular_values(self, input_data):
-        # self.register_singular_hooks()
+    def download_singular_values(self, input_data, OOD=False, pretrained=True):
         self.register_hooks(self.hook_compute_singular_values)
-        self.forward(input_data)
-        singular_save_path = f"values/{self.data_name}/singular_values_direct"
+        if OOD and not pretrained:
+            singular_save_path = f"values/{self.data_name}/singular_values_ood_random_init"
+        elif not pretrained:
+            singular_save_path = f"values/{self.data_name}/singular_values_random_init"
+        elif OOD:
+            singular_save_path = f"values/{self.data_name}/singular_values_ood"
+        else:
+            singular_save_path = f"values/{self.data_name}/singular_values"
+
         variance_path = f"values/{self.data_name}/variances"
         self.check_folder(singular_save_path)
         self.check_folder(variance_path)
+        self.forward(input_data)
 
         # check is the folder exist
         torch.save(self.singular_values, f"{singular_save_path}/{self.name}.pt")
@@ -358,6 +337,7 @@ class Analyzer(metaclass=ABCMeta):
 
     def add_gpus(self, main_device, classifier_device):
         self.main_device = main_device
+        self.model.to(self.main_device)
         self.classifier_device = classifier_device
 
     def download_cov_variances(self, input_data):
@@ -403,7 +383,10 @@ class Analyzer(metaclass=ABCMeta):
         self.check_folder(save_path)
 
         # register hooks
-        self.register_hooks(self.hook_vectorization())
+        if self.name == "mlp":
+            self.register_hooks(self.hook_full)
+        else:
+            self.register_hooks(self.hook_vectorization())
 
         # init classifiers
         self.init_classifers()
@@ -554,6 +537,7 @@ class ConvNextV2Analyzer(Analyzer):
         layers = []
         for name, module in self.model.named_modules():
             if isinstance(module, nn.Conv2d):
+                # if isinstance(module, ConvNextV2Block):
                 layers.append(module)
         return layers
 
@@ -574,6 +558,25 @@ class SwinAnalyzer(Analyzer):
         return layers
 
     def preprocess_output(self, output):
+        print(output.size())
+        output = output.view(output.size(0), -1)
+        return output
+
+
+class MAEAnalyzer(Analyzer):
+    def __init__(self, model, model_name, data_name):
+        super().__init__(model, model_name, data_name)
+
+    def get_layers(self):
+        layers = []
+        for name, module in self.model.named_modules():
+            if isinstance(module, Block):
+                layers.append(module)
+        print(len(layers))
+        return layers
+
+    def preprocess_output(self, output):
+        print(output.size())
         output = output.view(output.size(0), -1)
         return output
 
@@ -592,6 +595,7 @@ class DINOV2Analyzer(Analyzer):
         return layers
 
     def preprocess_output(self, output):
+        print(output.size())
         output = output.view(output.size(0), -1)
         return output
 
@@ -604,6 +608,8 @@ def get_analyzer(model, model_name: str, dummy_input):
         return ResNetAnalyzer(model, model_name, dummy_input)
     elif "convnextv2" in model_name.lower():
         return ConvNextV2Analyzer(model, model_name, dummy_input)
+    elif "mae" in model_name.lower():
+        return MAEAnalyzer(model, model_name, dummy_input)
     elif "convnext" in model_name.lower():
         return ConvNextAnalyzer(model, model_name, dummy_input)
     elif "swin" in model_name.lower():
