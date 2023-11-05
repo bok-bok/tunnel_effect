@@ -292,7 +292,7 @@ def plot_rank_acc(model_name, OOD, download=False, skip_count=0):
 
     x_axis = range(skip_count + 1, len(rank) + skip_count + 1)
 
-    tunnel_start_idx = find_tunnel_start(acc_for_tunnel)
+    tunnel_start_idx = find_tunnel_start(acc_for_tunnel, 0.98)
 
     fig, ax1 = plt.subplots(figsize=(6, 4))
     ax1.plot(x_axis, rank, label="Rank")
@@ -413,10 +413,6 @@ def plot_rank(
     plt.close()
 
 
-def get_dir(feature_type, normalize, knn):
-    return f"values/cifar10/{'knn_ood_acc' if knn else 'ood_acc'}/{feature_type}/resnet34{'_norm' if normalize else ''}.pt"
-
-
 def get_mean_std(data_name, specific_name, model_name):
     # set OOD or ID
     OOD = False if data_name == specific_name else True
@@ -444,6 +440,7 @@ model_name_convert = {
     "convnext": "ConvNext",
     "swin": "Swin Transformer",
     "dinov2": "DINOv2",
+    "mlp": "MLP",
 }
 
 data_name_convert = {
@@ -458,7 +455,7 @@ def plot_acc(ID_data_name, OOD_data_name, model_name, add_title=False):
     # get mean and std for ID and OOD
     ood_means, ood_stds = get_mean_std(ID_data_name, OOD_data_name, model_name)
     id_means, id_stds = get_mean_std(ID_data_name, ID_data_name, model_name)
-    tunnel_start = find_tunnel_start(id_means)
+    tunnel_start = find_tunnel_start(id_means, 0.98)
 
     plt.figure(figsize=(6, 4))
     if len(ood_means) > 40:
@@ -511,8 +508,8 @@ def plot_acc(ID_data_name, OOD_data_name, model_name, add_title=False):
 
     # plt.yticks(list(plt.yticks()[0]) + [max(id_means)])
     plt.fill_between(range(1, len(id_means) + 1), id_means - id_stds, id_means + id_stds, alpha=0.2)
-    # if tunnel_start is not None:
-    #     plt.axvspan(tunnel_start, len(ood_means), alpha=0.2, color="green")
+    if tunnel_start is not None:
+        plt.axvspan(tunnel_start, len(ood_means), alpha=0.2, color="green")
 
     plt.ylabel("Top-1 Accuracy[%]")
     plt.xlabel(f"{model_name_convert[model_name]} Layer")
@@ -527,14 +524,153 @@ def plot_acc(ID_data_name, OOD_data_name, model_name, add_title=False):
         plt.savefig(f"{model_name}_{ID_data_name}.png", dpi=300)
 
 
-if __name__ == "__main__":
-    models = ["dinov2"]
-    ID_data_name = "imagenet"
-    OOD_data_name = "places"
-    for model in models:
-        plot_acc(ID_data_name, OOD_data_name, model)
-        plot_acc(ID_data_name, OOD_data_name, model, True)
-    # plot_acc("cifar10", "resnet34")
-    # ood_acc = torch.load(f"values/imagenet/acc/resnet50/1.pt")
+def rankme(s, epsilon=1e-7):
+    p_k = (s / (torch.norm(s, 1))) + epsilon
 
-    # print(ood_acc)
+    entropy = -torch.sum(p_k * torch.log(p_k))
+
+    rankme_value = torch.exp(entropy)
+
+    return rankme_value.item()
+
+
+def get_rankme_ranks(sigs):
+    ranks = []
+    for sig in sigs:
+        rank = rankme(sig)
+        ranks.append(rank)
+    return ranks
+
+
+def get_original_ranks(sigs):
+    ranks = []
+    for sig in sigs:
+        threshold = torch.max(sig) * 0.001
+        rank = (sig > threshold).sum().item()
+        ranks.append(rank)
+    return ranks
+
+
+if __name__ == "__main__":
+    plot_acc("cifar10", "cifar100", "mlp", False)
+    # models = ["convnext"]
+    # ID_data_name = "imagenet"
+    # OOD_data_name = "places"
+    # for model in models:
+    #     plot_acc(ID_data_name, OOD_data_name, model)
+    #     plot_acc(ID_data_name, OOD_data_name, model, True)
+
+    # models = ["resnet34", "resnet50_swav", "convnext", "resnet50"]
+    # model_name = "resnet34"
+    # data_name = "cifar10"
+    # singular_values = torch.load(f"values/{data_name}/singular_values/{model_name}.pt")
+    # singular_values_ood = torch.load(f"values/{data_name}/singular_values_ood/{model_name}.pt")
+    # singular_values_random_init = torch.load(
+    #     f"values/{data_name}/singular_values_random_init/{model_name}.pt"
+    # )
+
+    # normal_ranks = get_rankme_ranks(singular_values)
+    # ood_ranks = get_rankme_ranks(singular_values_ood)
+
+    # random_ranks = get_rankme_ranks(singular_values_random_init)
+    # normal_ranks = np.array(normal_ranks) / np.max(normal_ranks)
+    # # ood_ = np.array(ood_ranks) / np.max(ood_ranks)
+    # random_ranks = np.array(random_ranks) / np.max(random_ranks)
+
+    # # change_in_rank = []
+    # # for i in range(len(normal_ranks)):
+    # #     normal = normal_ranks[i]
+    # #     random = random_ranks[i]
+    # #     new_rank = 100 * (normal - random) / random
+    # #     change_in_rank.append(new_rank)
+
+    # plt.figure(figsize=(6, 4))
+    # plt.plot(random_ranks, label="Random")
+    # plt.plot(normal_ranks, label="ID")
+    # # plt.plot(ood_ranks, label="OOD")
+    # plt.title(f"{model_name} Normalized Rank")
+    # plt.legend()
+    # plt.xlabel("Layers")
+    # plt.ylabel("Rank")
+    # plt.savefig(f"rankme_{model_name}_compare", dpi=300)
+
+    # plt.clf()
+
+    # flow_ranks = torch.load("values/cifar10/rank/resnet34.pt")
+    # cov_singular_values = torch.load("values/cifar10/singular_values/resnet34.pt")
+    # singular_values = torch.load("values/cifar10/singular_values/resnet34_direct.pt")
+    # singular_values = [sig**2 for sig in singular_values]
+
+    # original_ranks = []
+    # for sig in singular_values:
+    #     threshold = torch.max(sig) * 0.001
+    #     rank = (sig > threshold).sum().item()
+    #     original_ranks.append(rank)
+
+    # rankme_ranks = []
+
+    # for sig in singular_values:
+    #     rank = rankme(sig)
+    #     rankme_ranks.append(rank)
+
+    # dimensions = torch.load("values/cifar10/dimensions/resnet34.pt")
+    # for i, dim in enumerate(dimensions):
+    #     # d = min(dim, 10000)
+    #     d = dim
+    #     rankme_ranks[i] = rankme_ranks[i] / d
+    #     flow_ranks[i] = flow_ranks[i] / d
+    #     original_ranks[i] = original_ranks[i] / d
+
+    # # noremalize them
+    # rankme_ranks = np.array(rankme_ranks) / np.max(rankme_ranks)
+    # flow_ranks = np.array(flow_ranks) / np.max(flow_ranks)
+    # original_ranks = np.array(original_ranks) / np.max(original_ranks)
+
+    # plt.figure(figsize=(6, 4))
+    # plt.plot(rankme_ranks, label="RankMe")
+    # plt.plot(original_ranks, label="Original")
+    # plt.plot(flow_ranks, label="Flow")
+    # plt.title("ResNet34 Rank/dim")
+    # plt.legend()
+    # plt.savefig("rank_compare_d.png", dpi=300)
+
+    # for singular_value in singular_vales:
+    #     max_sing = torch.max(singular_value)
+    #     threshold = max_sing * torch.finfo(torch.float32).eps * len(singular_value)
+    #     rank = (singular_value > threshold).sum().item()
+    #     ranks.append(rank)
+    # plt.figure(figsize=(6, 4))
+    # plt.plot(ranks)
+    # plt.title("ResNet34 Rank - Original Method")
+    # plt.savefig("orignial_rank.png", dpi=300)
+    # plt.figure(figsize=(6, 4))
+    # for layer in range(len(singular_vales)):
+    #     flow_rank = flow_ranks[layer]
+    #     rank = ranks[layer]
+    #     sig = singular_vales[layer]
+    #     sig = sig**2
+
+    #     color_flow = ["C0" if i < flow_rank else "C1" for i in range(len(sig))]
+    #     color_original = ["C2" if i < rank else "C1" for i in range(len(sig))]
+
+    #     plt.bar(range(sig.shape[0]), sig, color=color_flow)
+    #     plt.xlim(left=0)
+    #     plt.yscale("log")
+
+    #     plt.xlabel(r"$i$")
+    #     plt.ylabel(r"$\sigma_i$")
+    #     plt.title(f"ResNet34 Layer {layer + 1} Flow Rank")
+    #     plt.savefig(f"sigs_plots/direct/sig_{layer+1}_flow.png", dpi=300)
+    #     plt.clf()
+
+    #     plt.figure(figsize=(6, 4))
+
+    #     plt.bar(range(sig.shape[0]), sig, color=color_original)
+    #     plt.xlim(left=0)
+    #     plt.yscale("log")
+
+    #     plt.xlabel(r"$i$")
+    #     plt.ylabel(r"$\sigma_i$")
+    #     plt.title(f"ResNet34 Layer {layer + 1} Original Rank")
+    #     plt.savefig(f"sigs_plots/direct/sig_{layer+1}.png", dpi=300)
+    #     plt.clf()
