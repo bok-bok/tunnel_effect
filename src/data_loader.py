@@ -9,6 +9,7 @@ from torchvision import datasets, transforms
 PLACE_DIR = "/data/datasets/Places/places365_standard/small_easyformat"
 IMAGENET_DIR = "/data/datasets/ImageNet1K"
 IMAGENET_DIR = "/data/datasets/ImageNet2012"
+IMAGENET_DIR = "/home/tyler/data/ImageNet2012"
 DIR_DICT = {"places": PLACE_DIR, "imagenet": IMAGENET_DIR}
 
 
@@ -207,6 +208,15 @@ def get_cifar_input_data(sample_size=10000):
     )
     test_dataloader = DataLoader(test_dataset, batch_size=sample_size, shuffle=False)
     input_data = next(iter(test_dataloader))[0]
+    return input_data
+
+
+def get_cifar100_input_data(sample_size=10000):
+    train_transform, test_trainsform = get_CIFAR_transforms()
+    train_loader, test_loader = get_CIFAR_100_data_loader(
+        train_transform, test_trainsform, batch_size=sample_size
+    )
+    input_data = next(iter(train_loader))[0]
     return input_data
 
 
