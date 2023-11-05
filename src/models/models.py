@@ -1,4 +1,5 @@
 import math
+import sys
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 
@@ -12,6 +13,11 @@ from timm.models.layers import DropPath, trunc_normal_
 from torchvision import models
 
 from models.resnet_models_GN_WS import resnet34
+
+sys.path.append("models/mae")
+
+from models.mae import models_mae, models_vit
+from models.mae.util.pos_embed import interpolate_pos_embed
 
 
 class ResNet(nn.Module, metaclass=ABCMeta):
@@ -71,7 +77,7 @@ class ResNet34_GN(ResNet):
 
 
 class MLP(nn.Module):
-    def __init__(self, device="mps", weights_path=None):
+    def __init__(self, device="cuda", weights_path=None):
         super(MLP, self).__init__()
         layers = []
         input_size = 32 * 32 * 3  # CIFAR-10 images are 32x32 pixels with 3 color channels
@@ -424,4 +430,23 @@ class ConvNeXtV2(nn.Module):
 
 def convnextv2_base(**kwargs):
     model = ConvNeXtV2(depths=[3, 3, 27, 3], dims=[128, 256, 512, 1024], **kwargs)
+    return model
+
+
+def mae():
+    checkpoint = torch.load("weights/mae_pretrain_vit_base.pth")
+    model_name = "vit_base_patch16"
+    model = models_vit.__dict__[model_name](num_classes=1000, global_pool=False)
+
+    checkpoint_model = checkpoint["model"]
+    state_dict = model.state_dict()
+    for k in ["head.weight", "head.bias"]:
+        if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+            print(f"Removing key {k} from pretrained checkpoint")
+            del checkpoint_model[k]
+
+    interpolate_pos_embed(model, checkpoint_model)
+
+    # load pre-trained model
+    model.load_state_dict(checkpoint_model, strict=False)
     return model

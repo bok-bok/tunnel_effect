@@ -1,5 +1,6 @@
 import math
 import os
+import sys
 import time
 from collections import OrderedDict
 
@@ -14,14 +15,16 @@ import torchvision
 from flowtorch.analysis import SVD
 from sklearn import random_projection
 from timm.models.layers import trunc_normal_
+from timm.models.vision_transformer import Block
 from torch import nn
 
 # from solo.backbones import resnet18
-from torchvision.models import resnet18, resnet34
+from torchvision.models import Swin_B_Weights, resnet18, resnet34, swin_b
+from torchvision.models.swin_transformer import SwinTransformerBlock
 from tqdm import tqdm
 
 from data_loader import get_balanced_imagenet_input_data, get_data_loader
-from models.models import IterativeKNN, convnextv2_fcmae
+from models.models import IterativeKNN, convnextv2_fcmae, mae
 from utils import get_model
 from utils.utils import compute_X_reduced, get_size, random_projection_method
 
@@ -269,31 +272,15 @@ def test_model(model):
     print(f"test acc: {correct/total}")
 
 
-def extract_conv2d_layers(model):
-    conv_layers = []
-
-    for name, module in model.named_children():
-        if isinstance(module, torch.nn.Conv2d):
-            conv_layers.append(module)
-        else:
-            # Dive deeper into nested children
-            for sub_name, sub_module in module.named_children():
-                if isinstance(sub_module, torch.nn.Conv2d):
-                    conv_layers.append(sub_module)
-
-    return conv_layers
-
-
 if __name__ == "__main__":
-    # model = convnextv2_fcmae()
-    # layers = []
-    # for name, module in model.named_modules():
-    #     if isinstance(module, nn.Conv2d):
-    #         layers.append(module)
-    # print(layers)
-    # # conv_layers = extract_conv2d_layers(model)
-    # # print(conv_layers)
-    dinov2_1 = torch.load("values/imagenet/ood_acc/places/dinov2/0.pt")
-    dinov2_2 = torch.load("values/imagenet/ood_acc/places/dinov2/1.pt")
-    print(dinov2_1)
-    print(dinov2_2)
+    # dimensions = torch.load("values/cifar10/dimensions/resnet34.pt")
+    # for dim in dimensions:
+    #     print(dim)
+    model_name = "resnet34"
+    data_name = "cifar10"
+    singular_values_random_init = torch.load(
+        f"values/{data_name}/singular_values_random_init/{model_name}.pt"
+    )
+
+    for sig in singular_values_random_init:
+        print(len(sig))

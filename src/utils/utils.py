@@ -17,7 +17,7 @@ from torchvision.models import (
     swin_b,
 )
 
-from models.models import MLP, ResNet18, ResNet34, ResNet34_GN, convnextv2_fcmae
+from models.models import MLP, ResNet18, ResNet34, ResNet34_GN, convnextv2_fcmae, mae
 
 
 def mean_center(X):
@@ -89,29 +89,51 @@ def get_model(model_name: str, dataset: str, pretrained: bool = True, weights_pa
     if "cifar" in dataset:
         return get_cifar_model(model_name, pretrained, weights_path)
     else:
-        return get_imagenet_model(model_name)
+        return get_imagenet_model(model_name, pretrained)
 
 
-def get_imagenet_model(model_name: str):
+def get_imagenet_model(model_name: str, pretrained=True):
     if "resnet18" in model_name:
-        return resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+        if pretrained:
+            return resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+        else:
+            print("loading random init resnet18 model")
+            return resnet18()
     elif "resnet34" in model_name:
-        return resnet34(weights=ResNet34_Weights.IMAGENET1K_V1)
+        if pretrained:
+            return resnet34(weights=ResNet34_Weights.IMAGENET1K_V1)
+        else:
+            print("loading random init resnet34 model")
+            return resnet34()
     elif "resnet50" in model_name:
         if "swav" in model_name:
             print("loading resnet50 swav model")
             return torch.hub.load("facebookresearch/swav:main", "resnet50")
         else:
-            print("loading resnet50 model")
-            return resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+            if pretrained:
+                print("loading resnet50 model")
+                return resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+            else:
+                print(f"loading random init resnet50 model")
+                return resnet50()
+    elif "mae" in model_name.lower():
+        return mae()
     elif "convnextv2" in model_name.lower():
         print("loading convnextv2 model")
         return convnextv2_fcmae()
 
     elif "convnext" in model_name.lower():
-        return convnext_base(weights=ConvNeXt_Base_Weights.IMAGENET1K_V1)
+        if pretrained:
+            return convnext_base(weights=ConvNeXt_Base_Weights.IMAGENET1K_V1)
+        else:
+            print("loading random init convnext model")
+            return convnext_base()
     elif "swin" in model_name.lower():
-        return swin_b(weights=Swin_B_Weights.IMAGENET1K_V1)
+        if pretrained:
+            return swin_b(weights=Swin_B_Weights.IMAGENET1K_V1)
+        else:
+            print("loading random init swin model")
+            return swin_b()
     elif "dinov2" in model_name.lower():
         return torch.hub.load("facebookresearch/dinov2", "dinov2_vits14")
 
@@ -142,8 +164,9 @@ def get_cifar_model(model_name, pretrained=True, weights_path=None):
                     print(f"loading {weights_path}")
                     model = ResNet34(weights_path=weights_path)
                 else:
-                    model = ResNet34(weights_path="weights/resnet34_0.pth")
+                    model = ResNet34(weights_path="weights/resnet34.pth")
             else:
+                print("loading random model")
                 model = ResNet34()
     elif "mlp" in model_name:
         if pretrained:
