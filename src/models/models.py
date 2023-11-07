@@ -15,7 +15,11 @@ from torchvision import models
 from models.resnet_models_GN_WS import resnet34
 
 sys.path.append("models/mae")
+sys.path.append("models/CLIP")
+sys.path.append("models/CLIP/clip")
 
+from models.CLIP import clip
+from models.CLIP.clip import ResidualAttentionBlock
 from models.mae import models_mae, models_vit
 from models.mae.util.pos_embed import interpolate_pos_embed
 
@@ -156,32 +160,33 @@ class IterativeKNN:
         return np.sum(self.target_labels == self.predicted_labels) / len(self.target_labels)
 
 
-def convnextv2_fcmae():
+def convnextv2_fcmae(pretrained=True):
     model = convnextv2_base()
 
-    finetune = "weights/convnextv2_base_1k_224_fcmae.pt"
-    checkpoint = torch.load(finetune, map_location="cpu")
+    if pretrained:
+        finetune = "weights/convnextv2_base_1k_224_fcmae.pt"
+        checkpoint = torch.load(finetune, map_location="cpu")
 
-    checkpoint_model = checkpoint["model"]
-    state_dict = model.state_dict()
-    for k in ["head.weight", "head.bias"]:
-        if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-            print(f"Removing key {k} from pretrained checkpoint")
-            del checkpoint_model[k]
+        checkpoint_model = checkpoint["model"]
+        state_dict = model.state_dict()
+        for k in ["head.weight", "head.bias"]:
+            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+                print(f"Removing key {k} from pretrained checkpoint")
+                del checkpoint_model[k]
 
-    # remove decoder weights
-    checkpoint_model_keys = list(checkpoint_model.keys())
-    for k in checkpoint_model_keys:
-        if "decoder" in k or "mask_token" in k or "proj" in k or "pred" in k:
-            print(f"Removing key {k} from pretrained checkpoint")
-            del checkpoint_model[k]
+        # remove decoder weights
+        checkpoint_model_keys = list(checkpoint_model.keys())
+        for k in checkpoint_model_keys:
+            if "decoder" in k or "mask_token" in k or "proj" in k or "pred" in k:
+                print(f"Removing key {k} from pretrained checkpoint")
+                del checkpoint_model[k]
 
-    checkpoint_model = remap_checkpoint_keys(checkpoint_model)
-    load_state_dict(model, checkpoint_model)
+        checkpoint_model = remap_checkpoint_keys(checkpoint_model)
+        load_state_dict(model, checkpoint_model)
 
-    # manually initialize fc layer
-    trunc_normal_(model.head.weight, std=2e-5)
-    torch.nn.init.constant_(model.head.bias, 0.0)
+        # manually initialize fc layer
+        trunc_normal_(model.head.weight, std=2e-5)
+        torch.nn.init.constant_(model.head.bias, 0.0)
     return model
 
 
@@ -433,20 +438,27 @@ def convnextv2_base(**kwargs):
     return model
 
 
-def mae():
-    checkpoint = torch.load("weights/mae_pretrain_vit_base.pth")
+def mae(pretrained=True):
     model_name = "vit_base_patch16"
     model = models_vit.__dict__[model_name](num_classes=1000, global_pool=False)
+    if pretrained:
+        print("loading mae pre-trained model")
+        checkpoint = torch.load("weights/mae_pretrain_vit_base.pth")
 
-    checkpoint_model = checkpoint["model"]
-    state_dict = model.state_dict()
-    for k in ["head.weight", "head.bias"]:
-        if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-            print(f"Removing key {k} from pretrained checkpoint")
-            del checkpoint_model[k]
+        checkpoint_model = checkpoint["model"]
+        state_dict = model.state_dict()
+        for k in ["head.weight", "head.bias"]:
+            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+                print(f"Removing key {k} from pretrained checkpoint")
+                del checkpoint_model[k]
 
-    interpolate_pos_embed(model, checkpoint_model)
+        interpolate_pos_embed(model, checkpoint_model)
 
-    # load pre-trained model
-    model.load_state_dict(checkpoint_model, strict=False)
+        # load pre-trained model
+        model.load_state_dict(checkpoint_model, strict=False)
     return model
+
+
+def get_clip(pretrained=True):
+    if pretrained:
+        model, preprocess = clip.load("ViT-B/32", device="cuda")

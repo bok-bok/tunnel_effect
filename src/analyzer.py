@@ -1,5 +1,6 @@
 import gc
 import os
+import sys
 import time
 from abc import ABCMeta, abstractmethod
 
@@ -21,16 +22,18 @@ from utils.utils import (
     vectorize_global_max_pooling,
 )
 
+sys.path.append("models/CLIP/clip")
+from models.CLIP.clip import CLIP, ResidualAttentionBlock
 
-def random_projection_method(X, b):
-    X_reduced = compute_X_reduced(X, b).to("cuda")
 
-    variance = torch.var(X_reduced)
+def random_projection_method(X, b, device):
+    X_reduced = compute_X_reduced(X, b).to(device)
+    print(f"X_reduced shape: {X_reduced.size()}")
 
     squared_s = torch.linalg.svdvals(X_reduced) ** 2
     del X_reduced
 
-    return squared_s.detach().cpu(), variance.detach().cpu()
+    return squared_s.detach().cpu()
 
 
 class Analyzer(metaclass=ABCMeta):
@@ -41,7 +44,7 @@ class Analyzer(metaclass=ABCMeta):
         # freeze all layers in the model
         for param in model.parameters():
             param.requires_grad = False
-        self.model = model
+        self.model = model.to("cpu")
 
         self.init_variables()
 
@@ -50,7 +53,7 @@ class Analyzer(metaclass=ABCMeta):
             self.dummy_data = torch.randn(1, 3, 32, 32)
             self.b = 8192
         else:
-            self.dummy_data = torch.randn(1, 3, 224, 224)
+            self.dummy_data = torch.randn(1, 3, 224, 224, dtype=torch.float32)
             self.b = 13000
 
         if self.data_name in ["cifar10", "imagenet"]:
@@ -120,6 +123,21 @@ class Analyzer(metaclass=ABCMeta):
 
         return hook_vectorization_helper
 
+    def hook_compute_vectorized_singular_values(self, patch_size=2):
+        if self.data_name in ["places", "imagenet"]:
+            patch_size = 4
+
+        def hook_compute_vectorzed_singular_values_helper(module, input, output):
+            output = vectorize_global_avg_pooling(output, patch_size).T
+            print(f"output size : {output.size()}")
+            output = output.to(self.classifier_device)
+            singular_values = torch.linalg.svdvals(output).detach().cpu()
+            squared_s = singular_values**2
+            print(squared_s[:10])
+            self.singular_values.append(squared_s)
+
+        return hook_compute_vectorzed_singular_values_helper
+
     def hook_save_representation(self, module, input, output):
         output = self.preprocess_output(output)
         target = self.labels
@@ -134,78 +152,26 @@ class Analyzer(metaclass=ABCMeta):
         output = self.preprocess_output(output).T
         if output.size(1) == 1:
             return
+
         print(f"output shape: {output.size()}")
         d = output.size(0)
         N = output.size(1)
         if d <= N:
             print(f"use full matrix : {output.size()}")
-            output.to("cuda")
+            output = output.to(self.classifier_device)
             cov_mat = torch.cov(output, correction=1)
-            variance = torch.var(output)
+            print(f"cov_mat shape: {cov_mat.size()}")
             singular_values = torch.linalg.svdvals(cov_mat).detach().cpu()
+
             del cov_mat
         else:
             print(f"use random projection method : {output.size()}")
-            singular_values, variance = random_projection_method(output, self.b)
+            singular_values = random_projection_method(output, self.b, self.classifier_device)
 
         print(singular_values[:10])
         del input
         del output
-        self.variances.append(variance)
         self.singular_values.append(singular_values)
-
-    def hook_compute_flowtorch_cov_singular_values_and_ranks(self, module, input, output):
-        output = self.preprocess_output(output).T
-        if output.size(1) == 1:
-            return
-        print(f"output shape: {output.size()}")
-
-        # random select 8000 samples
-        random_indices = torch.randperm(output.size(0))[:8000]
-        output = torch.index_select(output, 0, random_indices)
-        # cov_matrix
-        cov_mat = torch.cov(output, correction=1)
-        svd = SVD(cov_mat, cov_mat.shape[0])
-        rank = svd.opt_rank
-        singular_values = svd.s
-        print(f"rank: {rank}")
-        print(len(singular_values))
-        self.ranks.append(rank)
-        self.singular_values.append(singular_values)
-
-    def hook_flowtorch_direct_singular_values_ranks(self, module, input, output):
-        # output = self.preprocess_output(output).detach().cpu().T
-        output = self.preprocess_output(output).T
-        if output.size(1) == 1:
-            return
-        print(f"use random projection method : {output.size()}")
-        X_reduced = compute_X_reduced(output, self.b)
-        print(f"X_reduced shape: {X_reduced.size()}")
-        svd = SVD(X_reduced, X_reduced.shape[0])
-        rank = svd.opt_rank
-        singular_values = svd.s
-        print(f"rank: {rank}")
-        print(len(singular_values))
-
-        self.ranks.append(rank)
-        self.singular_values.append(singular_values)
-
-    def save_flowtorch_rank_singular_values(self, input_data, direct=True):
-        if not direct:
-            self.register_hooks(self.hook_compute_flowtorch_cov_singular_values_and_ranks)
-        else:
-            print("direct method")
-            self.register_hooks(self.hook_flowtorch_direct_singular_values_ranks)
-        self.forward(input_data)
-
-        rank_save_path = f"values/{self.data_name}/rank"
-        singular_values_save_path = f"values/{self.data_name}/singular_values"
-        self.check_folder(singular_values_save_path)
-        self.check_folder(rank_save_path)
-        additional = "_direct" if direct else ""
-        torch.save(self.ranks, f"{rank_save_path}/{self.name}{additional}.pt")
-        torch.save(self.singular_values, f"{singular_values_save_path}/{self.name}{additional}.pt")
-        self.remove_hooks()
 
     def save_dimensions(self):
         # self.register_full_hooks()
@@ -232,18 +198,24 @@ class Analyzer(metaclass=ABCMeta):
         self.forward(input_data)
         self.remove_hooks()
 
-    def inspect_layers_dim(self, sample_size=15000):
+    def inspect_layers_dim(self, sample_size=15000, dummy_input=None, preprocess=False):
         # self.register_full_hooks()
         self.register_hooks(self.hook_full)
-        self.forward(self.dummy_data.to(self.main_device))
+        if dummy_input is None:
+            self.forward(self.dummy_data.to(self.main_device))
+        else:
+            print("use preprocess dummy input")
+            self.forward(dummy_input.to(self.main_device))
+
         for representation in self.representations:
             dim = representation.view(representation.size(0), -1).size(1)
-            representation_bytes = representation.element_size() * dim * sample_size
-            g_bytes = representation.element_size() * dim * self.b
-            reduced_bytes = representation.element_size() * self.b * sample_size
-            total_bytes = representation_bytes + g_bytes + reduced_bytes
-            size = get_size(total_bytes)
-            print(f"layer dim: {dim}, size: {size} GB")
+            # representation_bytes = representation.element_size() * dim * sample_size
+            # g_bytes = representation.element_size() * dim * self.b
+            # reduced_bytes = representation.element_size() * self.b * sample_size
+            # total_bytes = representation_bytes + g_bytes + reduced_bytes
+            # size = get_size(total_bytes)
+            # print(f"layer dim: {dim}, size: {size} GB")
+            print(f"layer dim: {dim}")
 
         self.remove_hooks()
 
@@ -282,27 +254,31 @@ class Analyzer(metaclass=ABCMeta):
         # reset representations
         self.singular_values = []
         self.representations = []
-        _ = self.model(input)
-
-    def download_singular_values(self, input_data, OOD=False, pretrained=True):
-        self.register_hooks(self.hook_compute_singular_values)
-        if OOD and not pretrained:
-            singular_save_path = f"values/{self.data_name}/singular_values_ood_random_init"
-        elif not pretrained:
-            singular_save_path = f"values/{self.data_name}/singular_values_random_init"
-        elif OOD:
-            singular_save_path = f"values/{self.data_name}/singular_values_ood"
+        input = input.to(self.main_device)
+        if self.name == "clip":
+            _ = self.model.encode_image(input)
         else:
-            singular_save_path = f"values/{self.data_name}/singular_values"
+            _ = self.model(input)
 
-        variance_path = f"values/{self.data_name}/variances"
+    def download_singular_values(self, input_data, specific_data_name, GAP=False, pretrained=True):
+        self.model.to(self.main_device)
+        if not GAP:
+            self.register_hooks(self.hook_compute_singular_values)
+            base_path = f"values/{self.data_name}/singular_values"
+        else:
+            self.register_hooks(self.hook_compute_vectorized_singular_values())
+            base_path = f"values/{self.data_name}/singular_values_GAP"
+
+        singular_save_path = f"{base_path}/{specific_data_name}"
+
         self.check_folder(singular_save_path)
-        self.check_folder(variance_path)
         self.forward(input_data)
 
         # check is the folder exist
-        torch.save(self.singular_values, f"{singular_save_path}/{self.name}.pt")
-        torch.save(self.variances, f"{variance_path}/{self.name}.pt")
+        torch.save(
+            self.singular_values,
+            f"{singular_save_path}/{self.name}{'_random_init' if not pretrained else ''}.pt",
+        )
         self.remove_hooks()
 
     def hook_compute_cov_variances(self, module, input, output):
@@ -330,21 +306,10 @@ class Analyzer(metaclass=ABCMeta):
         del output
         self.variances.append(variance)
 
-    def register_cov_variances_hooks(self):
-        for layer in self.layers:
-            hook = layer.register_forward_hook(self.hook_compute_cov_variances)
-            self.hooks.append(hook)
-
     def add_gpus(self, main_device, classifier_device):
         self.main_device = main_device
         self.model.to(self.main_device)
         self.classifier_device = classifier_device
-
-    def download_cov_variances(self, input_data):
-        self.register_cov_variances_hooks()
-        self.forward(input_data)
-        torch.save(self.variances, f"values/{self.data_name}/variances/{self.name}_cov.pt")
-        self.remove_hooks()
 
     def download_knn_accuracy(
         self, train_data_loader, test_dataloader, OOD, feature_type="original", normalize=False
@@ -377,13 +342,15 @@ class Analyzer(metaclass=ABCMeta):
         self.check_folder(save_dir)
         torch.save(accuracies, f"{save_dir}/{self.name}_{'norm' if normalize else ''}.pt")
 
-    def download_accuarcy(self, train_dataloader, test_dataloader):
+    def download_accuarcy(self, train_dataloader, test_dataloader, dummy_input=None):
         # create folder
         save_path = f"values/{'cifar10' if 'cifar' in self.data_name else 'imagenet'}/{'acc' if not self.OOD else f'ood_acc/{self.data_name}'}/{self.name}"
         self.check_folder(save_path)
+        if dummy_input is not None:
+            self.dummy_data = dummy_input
 
         # register hooks
-        if self.name == "mlp":
+        if self.name in ["mlp"]:
             self.register_hooks(self.hook_full)
         else:
             self.register_hooks(self.hook_vectorization())
@@ -576,7 +543,7 @@ class MAEAnalyzer(Analyzer):
         return layers
 
     def preprocess_output(self, output):
-        print(output.size())
+        output = output[:, 1:]
         output = output.view(output.size(0), -1)
         return output
 
@@ -592,6 +559,23 @@ class DINOV2Analyzer(Analyzer):
                 type(module)
             ):  # checking the type of the module by its string representation
                 layers.append(module)
+        return layers
+
+    def preprocess_output(self, output):
+        output = output.view(output.size(0), -1)
+        return output
+
+
+class CLIPAnalyzer(Analyzer):
+    def __init__(self, model, model_name, data_name):
+        super().__init__(model, model_name, data_name)
+
+    def get_layers(self):
+        layers = []
+        for name, module in self.model.named_modules():
+            if isinstance(module, ResidualAttentionBlock):
+                if "visual" in name:
+                    layers.append(module)
         return layers
 
     def preprocess_output(self, output):
@@ -618,5 +602,8 @@ def get_analyzer(model, model_name: str, dummy_input):
     elif "dinov2" in model_name.lower():
         print(f"loading {model_name} analyzer")
         return DINOV2Analyzer(model, model_name, dummy_input)
+    elif "clip" in model_name.lower():
+        print(f"loading {model_name} analyzer")
+        return CLIPAnalyzer(model, model_name, dummy_input)
     else:
         raise ValueError("model name not supported")
