@@ -9,11 +9,11 @@ from torchvision import datasets, transforms
 PLACE_DIR = "/data/datasets/Places/places365_standard/small_easyformat"
 IMAGENET_DIR = "/data/datasets/ImageNet1K"
 IMAGENET_DIR = "/data/datasets/ImageNet2012"
-IMAGENET_DIR = "/home/tyler/data/ImageNet2012"
+# IMAGENET_DIR = "/home/tyler/data/ImageNet2012"
 DIR_DICT = {"places": PLACE_DIR, "imagenet": IMAGENET_DIR}
 
 
-def get_data_loader(dataset_name, batch_size=512):
+def get_data_loader(dataset_name, batch_size=512, preprocess=None):
     if "cifar" in dataset_name:
         train_transform, test_transform = get_CIFAR_transforms()
         if "100" in dataset_name:
@@ -28,7 +28,11 @@ def get_data_loader(dataset_name, batch_size=512):
             train_samples_per_class = 200
             test_samples_per_class = 50
         data_loader = get_balanced_dataloader(
-            dataset_name, train_samples_per_class, test_samples_per_class, batch_size
+            dataset_name,
+            train_samples_per_class,
+            test_samples_per_class,
+            batch_size,
+            preprocess=preprocess,
         )
         return data_loader
 
@@ -96,10 +100,15 @@ def get_CIFAR_data_loader(train_transform, test_trainsform, batch_size=512):
 
 # dataloader for places and imagenet
 def get_balanced_dataloader(
-    data_name, train_samples_per_class, test_samples_per_class, batch_size=512, classes=None
+    data_name,
+    train_samples_per_class,
+    test_samples_per_class,
+    batch_size=512,
+    preprocess=None,
+    classes=None,
 ):
     train_dataset, test_dataset = get_balanced_dataset(
-        data_name, train_samples_per_class, test_samples_per_class, classes
+        data_name, train_samples_per_class, test_samples_per_class, classes, preprocess
     )
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
@@ -107,12 +116,17 @@ def get_balanced_dataloader(
 
 
 # for places and imagenet
-def get_balanced_dataset(data_name, train_samples_per_class, test_samples_per_class, classes=None):
+def get_balanced_dataset(
+    data_name, train_samples_per_class, test_samples_per_class, classes=None, preprocess=None
+):
     dataset_dir = DIR_DICT[data_name]
     train_dir = os.path.join(dataset_dir, "train")
     val_dir = os.path.join(dataset_dir, "val")
-
-    train_transform, test_transform = get_imagenet_transforms()
+    if preprocess is not None:
+        print("using custom preprocess for clip")
+        train_transform, test_transform = preprocess, preprocess
+    else:
+        train_transform, test_transform = get_imagenet_transforms()
 
     # create dataset
     train_dataset = datasets.ImageFolder(root=train_dir, transform=train_transform)
@@ -134,21 +148,13 @@ def get_balanced_dataset(data_name, train_samples_per_class, test_samples_per_cl
     return train_dataset, test_dataset
 
 
-def get_balanced_imagenet_indices(dataset, dataset_type, sample_size=15000):
-    if dataset_type not in ["train", "val"]:
-        raise ValueError("dataset_type must be train or val")
-    num_classes = len(dataset.classes)
-    samples_per_class = sample_size // num_classes
-
-    indices = []
-
-    for class_idx in range(num_classes):
-        class_indices = np.where(np.array(dataset.targets) == class_idx)[0]
-        class_sample_indices = np.random.choice(class_indices, samples_per_class, replace=False)
-
-        indices.extend(class_sample_indices)
-    torch.save(indices, f"values/{dataset_type}_balanced_indices.pt")
-    return indices
+def get_NINCO_input_data():
+    # get all ninco data
+    train_transform, test_transform = get_imagenet_transforms()
+    dataset = datasets.ImageFolder(root="./data/NINCO/NINCO_OOD_classes", transform=test_transform)
+    data_loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
+    input_data = next(iter(data_loader))[0]
+    return input_data
 
 
 def get_balanced_indices(dataset, dataset_name, dataset_type, samples_per_class=100, classes=None):
@@ -185,20 +191,63 @@ def get_balanced_indices(dataset, dataset_name, dataset_type, samples_per_class=
 
 
 def get_balanced_imagenet_input_data(sample_size=15000, use_previous=True):
-    cur_dir = os.path.dirname(os.path.abspath(__file__))
-    val_dir = os.path.join(cur_dir, "/data/datasets/ImageNet1K/val")
+    val_dir = os.path.join(IMAGENET_DIR, "val")
     _, test_transform = get_imagenet_transforms()
     val_dataset = datasets.ImageFolder(root=val_dir, transform=test_transform)
     # I want to get sample_size samples from val_dataset but with classes balanced
 
-    if not use_previous:
-        indices = get_balanced_imagenet_indices(val_dataset, "val", sample_size)
-    else:
-        indices = torch.load("values/balanced_indices.pt")
+    indices = get_balanced_input_indices(val_dataset, "imagenet", "val", sample_size)
+
     balanced_dataset = Subset(val_dataset, indices)
     balanced_dataloader = DataLoader(balanced_dataset, batch_size=sample_size, shuffle=False)
     input_data = next(iter(balanced_dataloader))[0]
     return input_data
+
+
+def get_balanced_places_input_data(sample_size=15000, use_previous=True):
+    val_dir = os.path.join(PLACE_DIR, "val")
+    _, test_transform = get_imagenet_transforms()
+    val_dataset = datasets.ImageFolder(root=val_dir, transform=test_transform)
+
+    indices = get_balanced_input_indices(val_dataset, "places", "val", sample_size)
+
+    balanced_dataset = Subset(val_dataset, indices)
+    balanced_dataloader = DataLoader(balanced_dataset, batch_size=sample_size, shuffle=False)
+    input_data = next(iter(balanced_dataloader))[0]
+    return input_data
+
+
+def get_balanced_input_indices(dataset, dataset_name, dataset_type, sample_size=15000):
+    if dataset_type not in ["train", "val"]:
+        raise ValueError("dataset_type must be train or val")
+
+    file_dir = f"values/{dataset_name}/indices/balanced_input_{sample_size}.pt"
+    if os.path.exists(file_dir):
+        print(f"loading saved {dataset_name} balanced input indices")
+        return torch.load(file_dir)
+    num_classes = len(dataset.classes)
+    samples_per_class = sample_size // num_classes
+    remainder = sample_size % num_classes
+
+    indices = []
+
+    for class_idx in range(num_classes):
+        class_indices = np.where(np.array(dataset.targets) == class_idx)[0]
+
+        # Distribute the remainder among the first few classes
+        if remainder > 0:
+            current_samples_per_class = samples_per_class + 1
+            remainder -= 1
+        else:
+            current_samples_per_class = samples_per_class
+
+        class_sample_indices = np.random.choice(
+            class_indices, current_samples_per_class, replace=False
+        )
+        indices.extend(class_sample_indices)
+
+    torch.save(indices, f"values/{dataset_name}/indices/balanced_input_{sample_size}.pt")
+    return indices
 
 
 def get_cifar_input_data(sample_size=10000):
