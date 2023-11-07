@@ -1,4 +1,5 @@
 import argparse
+import sys
 
 import matplotlib.pyplot as plt
 import torch
@@ -18,6 +19,11 @@ from torchvision.models import (
 )
 
 from models.models import MLP, ResNet18, ResNet34, ResNet34_GN, convnextv2_fcmae, mae
+
+sys.path.append("models/CLIP")
+sys.path.append("models/CLIP/clip")
+from models.CLIP import clip
+from models.CLIP.clip import CLIP, ResidualAttentionBlock
 
 
 def mean_center(X):
@@ -60,7 +66,14 @@ def random_projection_method(X, b, cov=False):
 
 
 def vectorize_global_avg_pooling(x, patch_size=2, normalize=False):
-    output = F.avg_pool2d(x, patch_size, stride=patch_size)
+    # check dim of x
+    if len(x.size()) == 4:
+        output = F.avg_pool2d(x, patch_size, stride=patch_size)
+    elif len(x.size()) == 3:
+        patch_size = 2
+        x = x[:, 1:]
+
+        output = F.avg_pool1d(x, patch_size, stride=patch_size)
     output = output.reshape(output.size(0), -1)
     if normalize:
         output = F.normalize(output, p=2, dim=1)
@@ -107,8 +120,23 @@ def get_imagenet_model(model_name: str, pretrained=True):
             return resnet34()
     elif "resnet50" in model_name:
         if "swav" in model_name:
-            print("loading resnet50 swav model")
-            return torch.hub.load("facebookresearch/swav:main", "resnet50")
+            path = "weights/swav_800ep_pretrain.pth.tar"
+            print(f"loading resnet50 swav model {path}")
+            model = resnet50()
+            state_dict = torch.load(path, map_location="cpu")
+            # remove prefixe "module."
+            state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+            for k, v in model.state_dict().items():
+                if k not in list(state_dict):
+                    print('key "{}" could not be found in provided state dict'.format(k))
+                elif state_dict[k].shape != v.shape:
+                    print(
+                        'key "{}" is of different shape in model and provided state dict'.format(k)
+                    )
+                    state_dict[k] = v
+            model.load_state_dict(state_dict, strict=False)
+            return model
+            # return torch.hub.load("facebookresearch/swav:main", "resnet50")
         else:
             if pretrained:
                 print("loading resnet50 model")
@@ -117,13 +145,21 @@ def get_imagenet_model(model_name: str, pretrained=True):
                 print(f"loading random init resnet50 model")
                 return resnet50()
     elif "mae" in model_name.lower():
-        return mae()
+        return mae(pretrained=pretrained)
     elif "convnextv2" in model_name.lower():
         print("loading convnextv2 model")
-        return convnextv2_fcmae()
+        return convnextv2_fcmae(pretrained=pretrained)
+    elif "clip" in model_name.lower():
+        if pretrained:
+            print("loading imagenet1k pretrained clip model")
+            return clip.load("ViT-B/32", jit=False)
+        else:
+            print("loading random init clip model")
+            return clip.load("ViT-B/32", jit=False, pretrained=False)
 
     elif "convnext" in model_name.lower():
         if pretrained:
+            print("loading imagenet1k pretrained convnext model")
             return convnext_base(weights=ConvNeXt_Base_Weights.IMAGENET1K_V1)
         else:
             print("loading random init convnext model")
