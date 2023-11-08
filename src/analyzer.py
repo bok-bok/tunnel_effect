@@ -10,6 +10,7 @@ from flowtorch.analysis import SVD
 from timm.models.vision_transformer import Block
 from torch import nn, optim
 from torchvision.models.swin_transformer import SwinTransformerBlock
+from torchvision.models.vision_transformer import EncoderBlock
 from tqdm import tqdm
 
 from models.models import IterativeKNN
@@ -58,7 +59,7 @@ class Analyzer(metaclass=ABCMeta):
 
         if self.data_name in ["cifar10", "imagenet"]:
             self.OOD = False
-        elif self.data_name in ["cifar100", "places"]:
+        elif self.data_name in ["cifar100", "places", "ninco"]:
             self.OOD = True
 
         self.singular_values = []
@@ -113,7 +114,7 @@ class Analyzer(metaclass=ABCMeta):
         self.representations.append(output)
 
     def hook_vectorization(self, patch_size=2):
-        if self.data_name in ["places", "imagenet"]:
+        if self.data_name in ["places", "imagenet", "ninco"]:
             patch_size = 4
         print(f"patch size: {patch_size}")
 
@@ -548,6 +549,24 @@ class MAEAnalyzer(Analyzer):
         return output
 
 
+class VITAnalyzer(Analyzer):
+    def __init__(self, model, model_name, data_name):
+        super().__init__(model, model_name, data_name)
+
+    def get_layers(self):
+        layers = []
+        for name, module in self.model.named_modules():
+            if isinstance(module, EncoderBlock):
+                layers.append(module)
+        print(len(layers))
+        return layers
+
+    def preprocess_output(self, output):
+        output = output[:, 1:]
+        output = output.view(output.size(0), -1)
+        return output
+
+
 class DINOV2Analyzer(Analyzer):
     def __init__(self, model, model_name, data_name):
         super().__init__(model, model_name, data_name)
@@ -592,6 +611,8 @@ def get_analyzer(model, model_name: str, dummy_input):
         return ResNetAnalyzer(model, model_name, dummy_input)
     elif "convnextv2" in model_name.lower():
         return ConvNextV2Analyzer(model, model_name, dummy_input)
+    elif "vit" in model_name.lower():
+        return VITAnalyzer(model, model_name, dummy_input)
     elif "mae" in model_name.lower():
         return MAEAnalyzer(model, model_name, dummy_input)
     elif "convnext" in model_name.lower():
