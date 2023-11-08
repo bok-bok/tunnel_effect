@@ -3,6 +3,7 @@ import os
 import numpy as np
 import torch
 import torchvision
+from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset, Subset, SubsetRandomSampler
 from torchvision import datasets, transforms
 
@@ -11,11 +12,9 @@ IMAGENET_DIR = "/data/datasets/ImageNet1K"
 IMAGENET_DIR = "/data/datasets/ImageNet2012"
 # IMAGENET_DIR = "/home/tyler/data/ImageNet2012"
 
-NINCO_DIR = "/home/tolga/data/ninco/NINCO_OOD_classes"
+NINCO_DIR = "data/NINCO/NINCO_OOD_classes"
 
-DIR_DICT = {"places": PLACE_DIR, 
-            "imagenet": IMAGENET_DIR,
-            "ninco": NINCO_DIR}
+DIR_DICT = {"places": PLACE_DIR, "imagenet": IMAGENET_DIR, "ninco": NINCO_DIR}
 
 
 def get_data_loader(dataset_name, batch_size=512, preprocess=None):
@@ -25,6 +24,9 @@ def get_data_loader(dataset_name, batch_size=512, preprocess=None):
             return get_CIFAR_100_data_loader(train_transform, test_transform, batch_size)
         elif "10" in dataset_name:
             return get_CIFAR_data_loader(train_transform, test_transform, batch_size)
+    elif dataset_name == "ninco":
+        print("loading ninco data")
+        return get_NINCO_dataloader(100, 100, batch_size)
     elif dataset_name == "imagenet" or dataset_name == "places":
         if dataset_name == "places":
             train_samples_per_class = 100
@@ -161,44 +163,48 @@ def get_NINCO_input_data():
     input_data = next(iter(data_loader))[0]
     return input_data
 
+
 def get_NINCO_transforms():
-    
-    train_transform = transforms.Compose([
-        transforms.Resize((224, 224),interpolation=transforms.InterpolationMode.BICUBIC),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-    
-    test_transform = transforms.Compose([
-        transforms.Resize((224, 224),interpolation=transforms.InterpolationMode.BICUBIC),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-    
+    train_transform = transforms.Compose(
+        [
+            transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+
+    test_transform = transforms.Compose(
+        [
+            transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+
     return train_transform, test_transform
 
-def get_NINCO_dataloader(train_samples_per_class,test_samples_per_class,batch_size=512):
-    
-    #TODO: We need a way to sample with replacement to match samples_per_class requirement
-    
-    train_transform, _ = get_NINCO_transforms()
-        
-    dset = datasets.ImageFolder(root=NINCO_DIR,transform=train_transform)
-    
-    from sklearn.model_selection import train_test_split
-    train_idx, valid_idx = train_test_split(np.arange(len(dset)), 
-                                        test_size=0.2, 
-                                        random_state=42,
-                                        stratify=dset.targets)
-    
+
+def get_NINCO_dataloader(train_samples_per_class, test_samples_per_class, batch_size=512):
+    # TODO: We need a way to sample with replacement to match samples_per_class requirement
+
+    # train_transform, _ = get_NINCO_transforms()
+    train_transform, _ = get_imagenet_transforms()
+
+    dset = datasets.ImageFolder(root=NINCO_DIR, transform=train_transform)
+
+    train_idx, valid_idx = train_test_split(
+        np.arange(len(dset)), test_size=0.2, random_state=42, stratify=dset.targets
+    )
+
     train_dataset = Subset(dset, train_idx)
     valid_dataset = Subset(dset, valid_idx)
-    
+    print(f"train dataset: {len(train_dataset)}")
+    print(f"test dataset: {len(valid_dataset)}")
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
-    
+
     return train_loader, valid_loader
-    
+
 
 def get_balanced_indices(dataset, dataset_name, dataset_type, samples_per_class=100, classes=None):
     # create dir if not exits
