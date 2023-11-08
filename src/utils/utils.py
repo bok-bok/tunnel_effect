@@ -11,11 +11,13 @@ from torchvision.models import (
     ResNet34_Weights,
     ResNet50_Weights,
     Swin_B_Weights,
+    ViT_B_16_Weights,
     convnext_base,
     resnet18,
     resnet34,
     resnet50,
     swin_b,
+    vit_b_16,
 )
 
 from models.models import MLP, ResNet18, ResNet34, ResNet34_GN, convnextv2_fcmae, mae
@@ -67,13 +69,19 @@ def random_projection_method(X, b, cov=False):
 
 def vectorize_global_avg_pooling(x, patch_size=2, normalize=False):
     # check dim of x
+    # print(x.size())
     if len(x.size()) == 4:
         output = F.avg_pool2d(x, patch_size, stride=patch_size)
     elif len(x.size()) == 3:
+        # print(x.size())
         patch_size = 2
         x = x[:, 1:]
+        x_transposed = x.transpose(1, 2)
+        output = F.avg_pool1d(x_transposed, patch_size, stride=patch_size)
+        output = output.transpose(1, 2)
 
-        output = F.avg_pool1d(x, patch_size, stride=patch_size)
+        # output = F.avg_pool1d(x, patch_size, stride=patch_size)
+        # print(output.size())
     output = output.reshape(output.size(0), -1)
     if normalize:
         output = F.normalize(output, p=2, dim=1)
@@ -164,6 +172,8 @@ def get_imagenet_model(model_name: str, pretrained=True):
         else:
             print("loading random init convnext model")
             return convnext_base()
+    elif "vit" in model_name.lower():
+        return vit_b_16(ViT_B_16_Weights.IMAGENET1K_V1)
     elif "swin" in model_name.lower():
         if pretrained:
             return swin_b(weights=Swin_B_Weights.IMAGENET1K_V1)
