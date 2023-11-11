@@ -13,8 +13,14 @@ IMAGENET_DIR = "/data/datasets/ImageNet2012"
 # IMAGENET_DIR = "/home/tyler/data/ImageNet2012"
 
 NINCO_DIR = "data/NINCO/NINCO_OOD_classes"
+IMAGENET_100_DIR = "/data/datasets/ImageNet-100"
 
-DIR_DICT = {"places": PLACE_DIR, "imagenet": IMAGENET_DIR, "ninco": NINCO_DIR}
+DIR_DICT = {
+    "places": PLACE_DIR,
+    "imagenet": IMAGENET_DIR,
+    "ninco": NINCO_DIR,
+    "imagenet100": IMAGENET_100_DIR,
+}
 
 
 def get_data_loader(dataset_name, batch_size=512, preprocess=None):
@@ -155,6 +161,60 @@ def get_balanced_dataset(
     return train_dataset, test_dataset
 
 
+def get_ImageNet100_dataloader(resolution_size, batch_size=512, classes_num=100, use_all=False):
+    print(f"loading ImageNet100 data with resolution {resolution_size}")
+    train_dir = os.path.join(IMAGENET_100_DIR, "train")
+    test_dir = os.path.join(IMAGENET_100_DIR, "val")
+
+    train_transform, test_transform = get_ImageNet100_transforms(resolution_size)
+
+    train_dataset = datasets.ImageFolder(root=train_dir, transform=train_transform)
+    test_dataset = datasets.ImageFolder(root=test_dir, transform=test_transform)
+    # get indices
+    data_name = "imagenet100"
+    if use_all:
+        train_samples_per_class = None
+        test_samples_per_class = None
+    else:
+        train_samples_per_class = 200
+        test_samples_per_class = 50
+
+    train_indices = get_balanced_indices(
+        train_dataset, data_name, "train", train_samples_per_class, classes_num
+    )
+    test_indices = get_balanced_indices(
+        test_dataset, data_name, "val", test_samples_per_class, classes_num
+    )
+    print(f"train indices: {len(train_indices)}")
+    print(f"test indices: {len(test_indices)}")
+
+    # create subset with indices
+    train_dataset = Subset(train_dataset, train_indices)
+    test_dataset = Subset(test_dataset, test_indices)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+
+    return train_dataloader, test_dataloader
+
+
+def get_ImageNet100_transforms(image_size):
+    train_transform = transforms.Compose(
+        [
+            transforms.Resize((image_size, image_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+    test_transform = transforms.Compose(
+        [
+            transforms.Resize((image_size, image_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+    return train_transform, test_transform
+
+
 def get_NINCO_input_data():
     # get all ninco data
     train_transform, test_transform = get_imagenet_transforms()
@@ -216,11 +276,12 @@ def get_balanced_indices(dataset, dataset_name, dataset_type, samples_per_class=
     if classes is not None:
         num_classes = classes
 
-    # if file exists, return
-    file_dir = os.path.join(save_dir, f"{dataset_type}_{num_classes}_{samples_per_class}.pt")
-    if os.path.exists(file_dir):
-        print(f"loading saved {dataset_name} balanced indices")
-        return torch.load(file_dir)
+    if samples_per_class is not None:
+        # if file exists, return
+        file_dir = os.path.join(save_dir, f"{dataset_type}_{num_classes}_{samples_per_class}.pt")
+        if os.path.exists(file_dir):
+            print(f"loading saved {dataset_name} balanced indices")
+            return torch.load(file_dir)
 
     if dataset_type not in ["train", "val"]:
         raise ValueError("dataset_type must be train or val")
@@ -231,9 +292,11 @@ def get_balanced_indices(dataset, dataset_name, dataset_type, samples_per_class=
     indices = []
     for class_idx in range(num_classes):
         class_indices = np.where(np.array(dataset.targets) == class_idx)[0]
-        class_sample_indices = np.random.choice(class_indices, samples_per_class, replace=False)
+        if samples_per_class is not None:
+            class_indices = np.random.choice(class_indices, samples_per_class, replace=False)
 
-        indices.extend(class_sample_indices)
+        indices.extend(class_indices)
+
     save_path = f"{save_dir}/{dataset_type}_{num_classes}_{samples_per_class}.pt"
     torch.save(indices, save_path)
     return indices
