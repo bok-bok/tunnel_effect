@@ -5,8 +5,8 @@ BATCH_SIZE=128
 
 LR=0.1
 MOMENTUM=0.9
-WEIGHT_DECAY=0.005
-EPOCHS=164
+WEIGHT_DECAY=0.001
+EPOCHS=40
 
 
 GPU=0
@@ -18,5 +18,5 @@ python trainer.py \
     --wd $WEIGHT_DECAY \
     --momentum $MOMENTUM \
     --epochs $EPOCHS \
-    --milestones 22 50 \
+    --milestones 10 20 30\
     --gpu $GPU \
