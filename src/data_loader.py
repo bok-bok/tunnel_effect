@@ -23,7 +23,7 @@ DIR_DICT = {
 }
 
 
-def get_data_loader(dataset_name, batch_size=512, preprocess=None):
+def get_data_loader(dataset_name, batch_size=512, resolution=224):
     if "cifar" in dataset_name:
         train_transform, test_transform = get_CIFAR_transforms()
         if "100" in dataset_name:
@@ -32,7 +32,9 @@ def get_data_loader(dataset_name, batch_size=512, preprocess=None):
             return get_CIFAR_data_loader(train_transform, test_transform, batch_size)
     elif dataset_name == "ninco":
         print("loading ninco data")
-        return get_NINCO_dataloader(100, 100, batch_size)
+        return get_NINCO_dataloader(100, 100, batch_size, resolution)
+    elif dataset_name == "imagenet100":
+        return get_ImageNet100_dataloader(resolution, batch_size, 100, use_all=False)
     elif dataset_name == "imagenet" or dataset_name == "places":
         if dataset_name == "places":
             train_samples_per_class = 100
@@ -40,12 +42,13 @@ def get_data_loader(dataset_name, batch_size=512, preprocess=None):
         else:
             train_samples_per_class = 200
             test_samples_per_class = 50
+        print(f"loading {dataset_name} data with resolution {resolution}")
         data_loader = get_balanced_dataloader(
-            dataset_name,
-            train_samples_per_class,
-            test_samples_per_class,
-            batch_size,
-            preprocess=preprocess,
+            data_name=dataset_name,
+            train_samples_per_class=train_samples_per_class,
+            test_samples_per_class=test_samples_per_class,
+            batch_size=batch_size,
+            resolution=resolution,
         )
         return data_loader
 
@@ -119,9 +122,10 @@ def get_balanced_dataloader(
     batch_size=512,
     preprocess=None,
     classes=None,
+    resolution=224,
 ):
     train_dataset, test_dataset = get_balanced_dataset(
-        data_name, train_samples_per_class, test_samples_per_class, classes, preprocess
+        data_name, train_samples_per_class, test_samples_per_class, classes, resolution
     )
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
@@ -130,16 +134,12 @@ def get_balanced_dataloader(
 
 # for places and imagenet
 def get_balanced_dataset(
-    data_name, train_samples_per_class, test_samples_per_class, classes=None, preprocess=None
+    data_name, train_samples_per_class, test_samples_per_class, classes=None, resolution=224
 ):
     dataset_dir = DIR_DICT[data_name]
     train_dir = os.path.join(dataset_dir, "train")
     val_dir = os.path.join(dataset_dir, "val")
-    if preprocess is not None:
-        print("using custom preprocess for clip")
-        train_transform, test_transform = preprocess, preprocess
-    else:
-        train_transform, test_transform = get_imagenet_transforms()
+    train_transform, test_transform = get_imagenet_transforms(resolution)
 
     # create dataset
     train_dataset = datasets.ImageFolder(root=train_dir, transform=train_transform)
@@ -244,11 +244,13 @@ def get_NINCO_transforms():
     return train_transform, test_transform
 
 
-def get_NINCO_dataloader(train_samples_per_class, test_samples_per_class, batch_size=512):
+def get_NINCO_dataloader(
+    train_samples_per_class, test_samples_per_class, batch_size=512, resolution=224
+):
     # TODO: We need a way to sample with replacement to match samples_per_class requirement
 
     # train_transform, _ = get_NINCO_transforms()
-    train_transform, _ = get_imagenet_transforms()
+    train_transform, _ = get_imagenet_transforms(resolution_size=resolution)
 
     dset = datasets.ImageFolder(root=NINCO_DIR, transform=train_transform)
 
@@ -381,10 +383,11 @@ def get_cifar100_input_data(sample_size=10000):
     return input_data
 
 
-def get_imagenet_transforms():
+def get_imagenet_transforms(resolution_size=224):
+    print(f"loading data with resolution {resolution_size}")
     train_transform = transforms.Compose(
         [
-            transforms.Resize((224, 224)),
+            transforms.Resize((resolution_size, resolution_size)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
@@ -392,7 +395,7 @@ def get_imagenet_transforms():
 
     test_transform = transforms.Compose(
         [
-            transforms.Resize((224, 224)),
+            transforms.Resize((resolution_size, resolution_size)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]

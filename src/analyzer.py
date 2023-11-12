@@ -57,7 +57,7 @@ class Analyzer(metaclass=ABCMeta):
             self.dummy_data = torch.randn(1, 3, 224, 224, dtype=torch.float32)
             self.b = 13000
 
-        if self.data_name in ["cifar10", "imagenet"]:
+        if self.data_name in ["cifar10", "imagenet", "imagenet100"]:
             self.OOD = False
         elif self.data_name in ["cifar100", "places", "ninco"]:
             self.OOD = True
@@ -113,9 +113,14 @@ class Analyzer(metaclass=ABCMeta):
         output = self.preprocess_output(output)
         self.representations.append(output)
 
-    def hook_vectorization(self, patch_size=2):
-        if self.data_name in ["places", "imagenet", "ninco"]:
+    def hook_vectorization(self, resolution):
+        # if self.data_name in ["places", "imagenet", "ninco"]:
+        #     patch_size = 4
+        if resolution == 224 or resolution == 128:
             patch_size = 4
+        else:
+            patch_size = 2
+
         print(f"patch size: {patch_size}")
 
         def hook_vectorization_helper(module, input, output):
@@ -220,10 +225,11 @@ class Analyzer(metaclass=ABCMeta):
 
         self.remove_hooks()
 
-    def init_classifers(self):
+    def init_classifers(self, resolution):
         self.classifiers = []
         self.optimizers = []
-        self.forward(self.dummy_data.to(self.main_device))
+        dummy = torch.randn(1, 3, resolution, resolution)
+        self.forward(dummy.to(self.main_device))
         if "cifar" in self.data_name:
             num_classes = 10
         else:
@@ -343,21 +349,19 @@ class Analyzer(metaclass=ABCMeta):
         self.check_folder(save_dir)
         torch.save(accuracies, f"{save_dir}/{self.name}_{'norm' if normalize else ''}.pt")
 
-    def download_accuarcy(self, train_dataloader, test_dataloader, dummy_input=None):
+    def download_accuarcy(self, train_dataloader, test_dataloader, pretrained_data, resolution):
         # create folder
-        save_path = f"values/{'cifar10' if 'cifar' in self.data_name else 'imagenet'}/{'acc' if not self.OOD else f'ood_acc/{self.data_name}'}/{self.name}"
+        save_path = f"values/{pretrained_data}/{'acc' if not self.OOD else f'ood_acc/{self.data_name}'}/{self.name}"
         self.check_folder(save_path)
-        if dummy_input is not None:
-            self.dummy_data = dummy_input
 
         # register hooks
         if self.name in ["mlp"]:
             self.register_hooks(self.hook_full)
         else:
-            self.register_hooks(self.hook_vectorization())
+            self.register_hooks(self.hook_vectorization(resolution=resolution))
 
         # init classifiers
-        self.init_classifers()
+        self.init_classifers(resolution)
         self.train_classifers(train_dataloader)
         accuracies = self.test_classifers(test_dataloader)
 
@@ -505,8 +509,8 @@ class ConvNextV2Analyzer(Analyzer):
         layers = []
         for name, module in self.model.named_modules():
             if isinstance(module, nn.Conv2d):
-                # if isinstance(module, ConvNextV2Block):
-                layers.append(module)
+                if "conv" in name:
+                    layers.append(module)
         return layers
 
     def preprocess_output(self, output) -> torch.FloatTensor:
@@ -563,7 +567,7 @@ class VITAnalyzer(Analyzer):
 
     def preprocess_output(self, output):
         output = output[:, 1:]
-        output = output.view(output.size(0), -1)
+        output = output.reshape(output.size(0), -1)
         return output
 
 
@@ -611,8 +615,11 @@ def get_analyzer(model, model_name: str, dummy_input):
         return ResNetAnalyzer(model, model_name, dummy_input)
     elif "convnextv2" in model_name.lower():
         return ConvNextV2Analyzer(model, model_name, dummy_input)
+
     elif "vit" in model_name.lower():
-        return VITAnalyzer(model, model_name, dummy_input)
+        return MAEAnalyzer(model, model_name, dummy_input)
+    elif "mugs" in model_name.lower():
+        return MAEAnalyzer(model, model_name, dummy_input)
     elif "mae" in model_name.lower():
         return MAEAnalyzer(model, model_name, dummy_input)
     elif "convnext" in model_name.lower():
@@ -626,5 +633,7 @@ def get_analyzer(model, model_name: str, dummy_input):
     elif "clip" in model_name.lower():
         print(f"loading {model_name} analyzer")
         return CLIPAnalyzer(model, model_name, dummy_input)
+    elif "dino" in model_name.lower():
+        return MAEAnalyzer(model, model_name, dummy_input)
     else:
         raise ValueError("model name not supported")

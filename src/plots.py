@@ -90,7 +90,7 @@ def plot_error_dimension(model_name, dim, original=False, download=False):
         errors_mean[k] = np.mean(v)
         errors_std[k] = np.std(v)
 
-    plt.figure(figsize=(6, 4))
+    plt.figure(figsize=(10, 8))
     # plot original method error
     if original:
         original_errors: dict = torch.load(f"values/errors/{model_name}/original_{dim}.pt")
@@ -114,11 +114,10 @@ def plot_error_dimension(model_name, dim, original=False, download=False):
 
     plt.xlabel("Dimensionality")
     plt.ylabel("Maximum Absolute Error")
-    plt.legend()
+    plt.legend(loc="best", frameon=True, framealpha=0.6, ncol=2)
     plt.grid()
     if download:
         plt.savefig(f"{model_name}_MAE_dimension", dpi=300)
-    plt.show()
 
 
 def plot_mean_std(mean, std, label):
@@ -173,7 +172,7 @@ def plot_mlp():
 
     x_axis = range(1, len(counts_mean) + 1)
 
-    tunnel_start_idx = find_tunnel_start(acc_mean, 0.98)
+    # tunnel_start_idx = find_tunnel_start(acc_mean, 0.98)
 
     fig, ax1 = plt.subplots(figsize=(6, 4))
     ax1.plot(x_axis, counts_mean, label="Rank")
@@ -213,7 +212,7 @@ def plot_mlp():
         line.set_color(colors[i % len(colors)])
     plt.legend(lines, labels, loc="lower center")
     plt.xlim(left=x_axis[0], right=x_axis[-1])
-    plt.axvspan(tunnel_start_idx, len(counts_mean), alpha=0.2, color="green")
+    # plt.axvspan(tunnel_start_idx, len(counts_mean), alpha=0.2, color="green")
     plt.xticks(x_axis, labels=[str(x) for x in x_axis])
 
     plt.grid(axis="both")
@@ -306,9 +305,6 @@ def plot_rank_acc(model_name, OOD, download=False, skip_count=0):
 
     lines = ax1.get_lines() + ax2.get_lines()
     labels = [line.get_label() for line in lines]
-    colors = ["blue", "orange", "green", "red", "purple", "brown", "pink", "gray"]
-    for i, line in enumerate(lines):
-        line.set_color(colors[i % len(colors)])
     plt.legend(lines, labels, loc="lower center")
     # show xticks
     # if len(xticks) > 20: skip by 2
@@ -402,7 +398,6 @@ def plot_rank(
     plt.ylabel("Rank")
 
     save_dir = f"./plots/{'squared' if square else 'non_squared'}/{threshold_name}/{'cov' if cov else 'direct'}/{'original_dim' if original_dim else 'reduced_dim'}/"
-    print(save_dir)
     if not os.path.exists(os.path.dirname(save_dir)):
         os.makedirs(os.path.dirname(save_dir))
 
@@ -438,115 +433,30 @@ model_name_convert = {
     "resnet34": "ResNet34",
     "resnet50": "ResNet50",
     "resnet50_swav": "ResNet50 Swav",
+    "vit": "Vision Transformer",
+    "vit_torch": "Vision Transformer",
+    "mugs": "Mugs",
+    "dino": "DINO",
     "mae": "MAE",
     "convnext": "ConvNext",
     "swin": "Swin Transformer",
     "dinov2": "DINOv2",
     "convnextv2": "ConvNextV2",
     "mlp": "MLP",
+    "resnet34_imagenet100_32": "ResNet34 - Resolution 32",
+    "resnet34_imagenet100_64": "ResNet34 - Resolution 64",
+    "resnet34_imagenet100_128": "ResNet34 - Resolution 128",
+    "resnet34_imagenet100_224": "ResNet34 - Resolution 224",
 }
 
 data_name_convert = {
     "cifar10": "CIFAR-10",
     "cifar100": "CIFAR-100",
     "imagenet": "ImageNet-1K",
+    "imagenet100": "ImageNet-100",
     "places": "Places-365",
+    "ninco": "NINCO",
 }
-
-
-def plot_acc(
-    ID_data_name, OOD_data_name, model_name, tunnel_start=None, add_rank=False, add_title=False
-):
-    # get mean and std for ID and OOD
-    ood_means, ood_stds = get_mean_std(ID_data_name, OOD_data_name, model_name)
-    id_means, id_stds = get_mean_std(ID_data_name, ID_data_name, model_name)
-    # tunnel_start = find_tunnel_start(id_means, 0.98)
-
-    if add_rank:
-        singular_values = torch.load(
-            f"values/{ID_data_name}/singular_values/{ID_data_name}/{model_name}.pt"
-        )
-        ranks = get_rankme_ranks(singular_values)
-
-    fig, ax1 = plt.subplots(figsize=(6, 4))
-
-    if len(ood_means) > 40:
-        plt.xticks(
-            range(1, len(ood_means) + 1, 3),
-            labels=[str(x) for x in range(1, len(ood_means) + 1, 3)],
-        )
-    elif len(ood_means) > 20:
-        plt.xticks(
-            range(1, len(ood_means) + 1, 2),
-            labels=[str(x) for x in range(1, len(ood_means) + 1, 2)],
-        )
-    else:
-        plt.xticks(
-            range(1, len(ood_means) + 1), labels=[str(x) for x in range(1, len(ood_means) + 1)]
-        )
-    ID_data_name = data_name_convert[ID_data_name]
-    OOD_data_name = data_name_convert[OOD_data_name]
-
-    ax1.plot(range(1, len(ood_means) + 1), ood_means, label=f"OOD({OOD_data_name})")
-    ax1.fill_between(
-        range(1, len(ood_means) + 1), ood_means - ood_stds, ood_means + ood_stds, alpha=0.2
-    )
-
-    ax1.plot(range(1, len(id_means) + 1), id_means, label=f"ID({ID_data_name})")
-
-    # add best accuracy on y axis y ticks
-    # if best accuracy is overlap with last y tick, remove last y tick
-    # Get current y-ticks
-    yticks = list(plt.yticks()[0])
-
-    # Add best accuracy to y-ticks
-    yticks.append(max(id_means))
-
-    # Sort the y-ticks
-    yticks = sorted(yticks)
-    # print(yticks)
-
-    for i in range(len(yticks) - 1):
-        if abs(yticks[i] - yticks[i + 1]) < 2:
-            yticks[i] = 0
-    # Set the y-ticks
-    plt.yticks(yticks)
-    plt.grid()
-
-    # plt.yticks(list(plt.yticks()[0]) + [max(id_means)])
-    # plt.yticks(list(plt.yticks()[0]) + [max(id_means)])
-    ax1.fill_between(range(1, len(id_means) + 1), id_means - id_stds, id_means + id_stds, alpha=0.2)
-    if tunnel_start is not None:
-        plt.axvspan(tunnel_start, len(ood_means), alpha=0.2, color="green")
-
-    ax1.set_ylabel("Top-1 Accuracy[%]")
-    plt.ylim(bottom=0)
-    if add_rank:
-        ax2 = ax1.twinx()
-        ax2.plot(range(1, len(ranks) + 1), ranks, label="Rank", color="red", linestyle="dashed")
-        ax2.set_ylabel("Effective Rank")
-        lines = ax1.get_lines() + ax2.get_lines()
-        labels = [line.get_label() for line in lines]
-        plt.legend(lines, labels)
-    else:
-        plt.legend()
-    plt.xlabel(f"{model_name_convert[model_name]} Layer")
-    plt.xlim(left=1, right=len(ood_means))
-    plt.ylim(bottom=0)
-
-    # 0 from yticks
-    # yticks = list(plt.yticks()[0])[1:-1]
-    # plt.yticks(yticks)
-
-    save_dir = f"plots/{ID_data_name}/acc_rank/"
-
-    if not os.path.exists(os.path.dirname(save_dir)):
-        os.makedirs(os.path.dirname(save_dir))
-    if add_title:
-        plt.title(f"{model_name_convert[model_name]} - {ID_data_name}")
-        plt.savefig(f"{save_dir}/{model_name}_title.png", dpi=300)
-    else:
-        plt.savefig(f"{save_dir}/{model_name}.png", dpi=300)
 
 
 def rankme(s, epsilon=1e-7):
@@ -593,7 +503,7 @@ def plot_change_ranks(model_name, pretrained_data):
     random_ranks = np.array(get_rankme_ranks(random_sigs))
 
     percentage = (id_ranks - random_ranks) * 100 / random_ranks
-    plt.figure(figsize=(6, 4))
+    plt.figure(figsize=(8, 6))
     plt.plot(percentage)
     plt.ylabel("Change in Rank [%]")
     plt.xlabel(f"{model_name_convert[model_name]} Layers")
@@ -620,42 +530,190 @@ def plot_random_ranks(model_name, pretrained_data):
     plt.savefig(f"{model_name}_{pretrained_data}_random_ranks.png", dpi=300)
 
 
+def original_rank(sigs):
+    ranks = []
+    for sig in sigs:
+        threshold = torch.max(sig) * 0.001
+        rank = (sig > threshold).sum().item()
+        ranks.append(rank)
+    return ranks
+
+
+def plot_acc(
+    ID_data_name,
+    OOD_data_name,
+    OOD_data_name2,
+    model_name,
+    tunnel_start=None,
+    add_rank=False,
+    add_title=False,
+    normalize=False,
+):
+    # get mean and std for ID and OOD
+    ood_means, ood_stds = get_mean_std(ID_data_name, OOD_data_name, model_name)
+    ood_means_2, ood_stds_2 = get_mean_std(ID_data_name, OOD_data_name2, model_name)
+
+    id_means, id_stds = get_mean_std(ID_data_name, ID_data_name, model_name)
+    if normalize:
+        ood_means = np.array(ood_means) / max(ood_means)
+        ood_means_2 = np.array(ood_means_2) / max(ood_means_2)
+        id_means = np.array(id_means) / max(id_means)
+        ood_stds = np.array(ood_stds) / max(ood_stds)
+        ood_stds_2 = np.array(ood_stds_2) / max(ood_stds_2)
+        id_stds = np.array(id_stds) / max(id_stds)
+
+    # tunnel_start = find_tunnel_start(id_means, 0.95)
+
+    if add_rank:
+        singular_values = torch.load(
+            f"values/{ID_data_name}/singular_values/{ID_data_name}/{model_name}.pt"
+        )
+        ranks = get_rankme_ranks(singular_values)
+        # ranks = get_original_ranks(singular_values)
+
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    if len(ood_means) > 40:
+        plt.xticks(
+            range(1, len(ood_means) + 1, 3),
+            labels=[str(x) for x in range(1, len(ood_means) + 1, 3)],
+        )
+    elif len(ood_means) > 20:
+        plt.xticks(
+            range(1, len(ood_means) + 1, 2),
+            labels=[str(x) for x in range(1, len(ood_means) + 1, 2)],
+        )
+    else:
+        plt.xticks(
+            range(1, len(ood_means) + 1), labels=[str(x) for x in range(1, len(ood_means) + 1)]
+        )
+
+    ID_data_name = data_name_convert[ID_data_name]
+    OOD_data_name = data_name_convert[OOD_data_name]
+    OOD_data_name2 = data_name_convert[OOD_data_name2]
+
+    # plot OOD1
+    ax1.plot(
+        range(1, len(ood_means) + 1), ood_means, label=f"OOD({OOD_data_name})", color="#4DAF4A"
+    )
+    ax1.fill_between(
+        range(1, len(ood_means) + 1), ood_means - ood_stds, ood_means + ood_stds, alpha=0.2
+    )
+
+    # plot OOD2
+    # ax1.plot(
+    #     range(1, len(ood_means_2) + 1), ood_means_2, label=f"OOD({OOD_data_name2})", color="#A65628"
+    # )
+    # ax1.fill_between(
+    #     range(1, len(ood_means_2) + 1),
+    #     ood_means_2 - ood_stds_2,
+    #     ood_means_2 + ood_stds_2,
+    #     alpha=0.2,
+    # )
+
+    # plot ID
+    ax1.plot(range(1, len(id_means) + 1), id_means, label=f"ID({ID_data_name})", color="#377EB8")
+    ax1.fill_between(range(1, len(id_means) + 1), id_means - id_stds, id_means + id_stds, alpha=0.2)
+
+    y_start = min(min(ood_means), min(id_means)) - 1
+    ax1.set_ylim(bottom=y_start)
+
+    # Add best accuracy to y-ticks
+    # yticks = list(plt.yticks()[0])
+    # yticks.append(max(id_means))
+    # yticks = sorted(yticks)
+    # for i in range(len(yticks) - 1):
+    #     if abs(yticks[i] - yticks[i + 1]) < 2:
+    #         yticks[i] = 0
+    # plt.yticks(yticks)
+    plt.grid()
+
+    # plt.yticks(list(plt.yticks()[0]) + [max(id_means)])
+    # plt.yticks(list(plt.yticks()[0]) + [max(id_means)])
+    if tunnel_start is not None:
+        plt.axvspan(tunnel_start, len(ood_means), alpha=0.2, color="green")
+
+    ax1.set_ylabel("Top-1 Accuracy [%]")
+    plt.xlabel(f"{model_name_convert[model_name]} Layer")
+    if add_rank:
+        ax2 = ax1.twinx()
+        ax2.plot(range(1, len(ranks) + 1), ranks, label="Rank", color="#E41A1C", linestyle="dashed")
+        ax2.set_ylabel("Effective Rank")
+        ax2.set_ylim(bottom=0)
+        lines = ax1.get_lines() + ax2.get_lines()
+        labels = [line.get_label() for line in lines]
+        plt.legend(lines, labels, loc="best", frameon=True, framealpha=0.6, ncol=2)
+
+    else:
+        plt.legend(loc="best", frameon=True, framealpha=0.6, ncol=2)
+    plt.xlim(left=1, right=len(ood_means))
+    plt.ylim(bottom=0)
+
+    # 0 from yticks
+    # yticks = list(plt.yticks()[0])[1:-1]
+    # plt.yticks(yticks)
+
+    save_dir = f"plots/{ID_data_name}/acc_rank/"
+
+    if not os.path.exists(os.path.dirname(save_dir)):
+        os.makedirs(os.path.dirname(save_dir))
+
+    file_name = f"{model_name}{'_title' if add_title else ''}{'_normalized' if normalize else ''}_places.png"
+
+    if add_title:
+        plt.title(f"{model_name_convert[model_name]} - {ID_data_name}")
+    plt.savefig(f"{save_dir}/{file_name}", dpi=300)
+
+
+def compute_correlation(ID_data_name, OOD_data_name, model_name):
+    ood_means, ood_stds = get_mean_std(ID_data_name, OOD_data_name, model_name)
+    id_means, id_stds = get_mean_std(ID_data_name, ID_data_name, model_name)
+    correlation = np.corrcoef(ood_means, id_means)[0, 1]
+    return correlation
+
+
 if __name__ == "__main__":
-    # data_name = "cifar10"
-    # model_name = "resnet34"
-    # GAP_sig = torch.load("values/cifar10/singular_values_GAP/cifar10/resnet34.pt")
-    # full_sig = torch.load("values/cifar10/singular_values/cifar10/resnet34_full.pt")
-    # direct_sig = torch.load("values/cifar10/singular_values/cifar10/resnet34.pt")
+    # original_error = torch.load("values/errors/resnet34/original_32768.pt")
+    # projection_error = torch.load("values/errors/resnet34/projection_32768.pt")
+    # plot_error_dimension("resnet34", 32768, original=True, download=True)
 
-    # GAP_rank = get_rankme_ranks(GAP_sig)
-    # full_rank = get_rankme_ranks(full_sig)
-    # direct_rank = get_rankme_ranks(direct_sig)
+    model_names = [
+        # "resnet34_imagenet100_32",
+        # "resnet34_imagenet100_64",
+        # "resnet34_imagenet100_128",
+        # "resnet34_imagenet100_224",
+        "resnet34"
+    ]
+    for model_name in model_names:
+        id_data = "imagenet"
+        ood_data = "places"
+        ood_data_2 = "ninco"
+        tunnel_start = None
+        plot_acc(
+            id_data,
+            ood_data,
+            ood_data_2,
+            model_name,
+            tunnel_start,
+            add_rank=False,
+            add_title=True,
+            normalize=False,
+        )
 
-    # skip = len(GAP_rank) - len(full_rank)
-    # GAP_rank = GAP_rank[skip:]
-    # direct_rank = direct_rank[skip:]
-
-    # print(f"first layer full singular values {full_sig[0][:3]}")
-    # print(f"first layer GAP singular values {GAP_sig[0][:3]}")
-    # print(f"first layer random projection singular values {direct_sig[0][:3]}")
-    # print()
-    # GAP_correlation = np.corrcoef(GAP_rank, full_rank)[0, 1]
-    # direct_correlation = np.corrcoef(direct_rank, full_rank)[0, 1]
-    # print(f"Correlation with GAP rank : {GAP_correlation}")
-    # print(f"Correlation with random projection rank : {direct_correlation}")
-
-    # plt.figure(figsize=(6, 4))
-    # plt.title("ResNet34 - CIFAR-10 Rank with full vectors")
-    # plt.ylabel("Effective Rank")
-    # plt.xlabel("Layers")
-    # plt.plot(range(skip, 33), direct_rank)
-    # plt.grid()
-    # plt.savefig("resnet34_direct.png", dpi=300)
-
-    model_name = "resnet34"
-    tunnel_start = None
-    pretrained = "imagenet"
-    plot_acc("imagenet", "places", model_name, tunnel_start, add_rank=True, add_title=True)
+    # model_names = [
+    #     "resnet50",
+    #     "resnet50_swav",
+    #     "convnext",
+    #     "resnet34",
+    #     "vit",
+    #     "swin",
+    #     "dino",
+    #     "mae",
+    # ]
+    # model_names = ["mlp", "resnet34"]
+    # for model_name in model_names:
+    #     cor = compute_correlation("cifar10", "cifar100", model_name)
+    #     print(f"{model_name} - {cor}")
 
     # plot_random_ranks(model_name=model_name, pretrained_data=pretrained)
 
