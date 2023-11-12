@@ -11,8 +11,9 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler, normalize
 from timm.models.layers import DropPath, trunc_normal_
 from torchvision import models
+from torchvision.models import resnet34
 
-from models.resnet_models_GN_WS import resnet34
+# from models.resnet_models_GN_WS import resnet34
 
 sys.path.append("models/mae")
 sys.path.append("models/CLIP")
@@ -37,8 +38,9 @@ class ResNet(nn.Module, metaclass=ABCMeta):
         self.resnet.conv1 = nn.Conv2d(
             3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
         )
-        # self.resnet.bn1 = nn.BatchNorm2d(64)
         self.resnet.maxpool = nn.Identity()
+        # self.resnet.bn1 = nn.BatchNorm2d(64)
+        # self.resnet.maxpool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
         self.resnet.fc = nn.Linear(512, 10)
         if weights_path:
@@ -455,10 +457,47 @@ def mae(pretrained=True):
         interpolate_pos_embed(model, checkpoint_model)
 
         # load pre-trained model
-        model.load_state_dict(checkpoint_model, strict=False)
+        msg = model.load_state_dict(checkpoint_model, strict=False)
+        print(msg)
     return model
 
 
 def get_clip(pretrained=True):
     if pretrained:
         model, preprocess = clip.load("ViT-B/32", device="cuda")
+
+
+image100_pretrained_weights = {
+    32: "0.1_0.9_0.001_40",
+    64: "0.1_0.9_0.002_40",
+    128: "0.1_0.9_0.003_40",
+    224: "0.1_0.9_0.003_45",
+}
+
+
+def get_resnet34_imagenet100(resolution_size, pretrained=True):
+    model = resnet34(weights=None)
+    if resolution_size in [32, 64]:
+        print(f"loading resnet34 imagenet100 {resolution_size}")
+        model.conv1 = nn.Conv2d(
+            3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
+        )
+        model.maxpool = nn.Identity()
+    elif resolution_size == 128:
+        print(f"loading resnet34 imagenet100 {resolution_size}")
+        model.conv1 = nn.Conv2d(
+            3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
+        )
+    else:
+        print(f"loading resnet34 imagenet100 {resolution_size}")
+        pass
+    model.fc = nn.Linear(512, 100)
+    nn.init.xavier_uniform_(model.fc.weight)
+    if pretrained:
+        print(f"loading resnet34 imagenet100 {resolution_size} pretrained")
+        file_name = image100_pretrained_weights[resolution_size]
+        model.load_state_dict(
+            torch.load(f"weights/resnet34_imagenet100/{resolution_size}/{file_name}.pth")
+        )
+
+    return model
