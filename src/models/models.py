@@ -13,6 +13,8 @@ from timm.models.layers import DropPath, trunc_normal_
 from torchvision import models
 from torchvision.models import resnet34
 
+from models.vgg import VGG
+
 # from models.resnet_models_GN_WS import resnet34
 
 sys.path.append("models/mae")
@@ -474,6 +476,12 @@ image100_pretrained_weights = {
     224: "0.1_0.9_0.003_45",
 }
 
+
+def get_vgg_imagenet100(resolution_size, pretrained=True):
+    model = VGG("VGG13")
+    if pretrained:
+        pass
+    return model
 
 def get_resnet34_imagenet100(resolution_size, pretrained=True):
     model = resnet34(weights=None)

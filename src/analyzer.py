@@ -116,7 +116,11 @@ class Analyzer(metaclass=ABCMeta):
     def hook_vectorization(self, resolution):
         # if self.data_name in ["places", "imagenet", "ninco"]:
         #     patch_size = 4
-        if resolution == 224 or resolution == 128:
+        print(f"resolution: {resolution}")
+        print(f"data name: {self.data_name}")
+        if self.data_name == "imagenet100" and resolution == 224:
+            patch_size = 6
+        elif resolution == 224 or resolution == 128:
             patch_size = 4
         else:
             patch_size = 2
@@ -428,6 +432,22 @@ class Analyzer(metaclass=ABCMeta):
         # plot accuracy
 
 
+class VGGAnalyzer(Analyzer):
+    def __init__(self, model, model_name, dummy_input):
+        super().__init__(model, model_name, dummy_input)
+
+    def get_layers(self):
+        layers = []
+        for layer in self.model.features:
+            if isinstance(layer, nn.Conv2d):
+                layers.append(layer)
+        return layers
+
+    def preprocess_output(self, output) -> torch.FloatTensor:
+        output = output.view(output.size(0), -1)
+        return output
+
+
 class ResNetAnalyzer(Analyzer):
     def __init__(self, model, model_name, data_name):
         super().__init__(model, model_name, data_name)
@@ -610,6 +630,8 @@ class CLIPAnalyzer(Analyzer):
 def get_analyzer(model, model_name: str, dummy_input):
     if "mlp" in model_name:
         return MLPAnalyzer(model, model_name, dummy_input)
+    elif "vgg" in model_name:
+        return VGGAnalyzer(model, model_name, dummy_input)
 
     elif "resnet" in model_name:
         return ResNetAnalyzer(model, model_name, dummy_input)
