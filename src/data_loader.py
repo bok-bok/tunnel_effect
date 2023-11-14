@@ -23,7 +23,14 @@ DIR_DICT = {
 }
 
 
-def get_data_loader(dataset_name, batch_size=512, resolution=224):
+def get_data_loader(
+    dataset_name,
+    train_samples_per_class,
+    test_samples_per_class,
+    class_num,
+    batch_size=512,
+    resolution=224,
+):
     if "cifar" in dataset_name:
         train_transform, test_transform = get_CIFAR_transforms()
         if "100" in dataset_name:
@@ -40,13 +47,14 @@ def get_data_loader(dataset_name, batch_size=512, resolution=224):
             train_samples_per_class = 100
             test_samples_per_class = 100
         else:
-            train_samples_per_class = 200
-            test_samples_per_class = 50
-        print(f"loading {dataset_name} data with resolution {resolution}")
+            # train_samples_per_class = 100
+            # test_samples_per_class = 50
+            pass
         data_loader = get_balanced_dataloader(
             data_name=dataset_name,
             train_samples_per_class=train_samples_per_class,
             test_samples_per_class=test_samples_per_class,
+            class_num=class_num,
             batch_size=batch_size,
             resolution=resolution,
         )
@@ -119,13 +127,15 @@ def get_balanced_dataloader(
     data_name,
     train_samples_per_class,
     test_samples_per_class,
+    class_num,
     batch_size=512,
-    preprocess=None,
-    classes=None,
     resolution=224,
 ):
+    # print(f"train samples per class: {train_samples_per_class}")
+    # print(f"test samples per class: {test_samples_per_class}")
+    # print(f"loading class num: {class_num}")
     train_dataset, test_dataset = get_balanced_dataset(
-        data_name, train_samples_per_class, test_samples_per_class, classes, resolution
+        data_name, train_samples_per_class, test_samples_per_class, class_num, resolution
     )
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
@@ -250,6 +260,7 @@ def get_NINCO_dataloader(
     # TODO: We need a way to sample with replacement to match samples_per_class requirement
 
     # train_transform, _ = get_NINCO_transforms()
+    print(batch_size)
     train_transform, _ = get_imagenet_transforms(resolution_size=resolution)
 
     dset = datasets.ImageFolder(root=NINCO_DIR, transform=train_transform)
