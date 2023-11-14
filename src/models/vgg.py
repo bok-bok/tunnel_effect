@@ -8,10 +8,10 @@ cfg = {
 
 
 class VGG(nn.Module):
-    def __init__(self, vgg_name):
+    def __init__(self, vgg_name, class_num=100):
         super(VGG, self).__init__()
         self.features = self._make_layers(cfg[vgg_name])
-        self.classifier = nn.Linear(512, 100)
+        self.classifier = nn.Linear(512, class_num)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         nn.init.xavier_uniform_(self.classifier.weight)
 
