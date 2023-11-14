@@ -3,6 +3,15 @@ import argparse
 from transformers import ViTConfig,ViTModel, ViTForImageClassification
 
 
+
+def train():
+    pass
+
+def validate():
+    pass
+
+
+
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='ViT Trainer')
@@ -22,5 +31,6 @@ if __name__ == '__main__':
                        num_labels = args.num_labels)
     
     vit_model = ViTForImageClassification(config)
+    
     
     
