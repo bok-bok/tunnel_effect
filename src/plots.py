@@ -9,10 +9,10 @@ import torch
 plt.style.use("science")
 
 plt.rc("text", usetex=False)  # disable LaTeX font
+plt.rc("font", size=17, weight="bold")
 os.environ["PATH"] += os.pathsep + "/Library/TeX/texbin"
-plt.rc("font", size=16, weight="bold")
 
-plt.rc("lines", linewidth=2)
+plt.rc("lines", linewidth=3)
 
 
 def get_ranks(sigs, threshold):
@@ -447,14 +447,22 @@ model_name_convert = {
     "resnet34_imagenet100_64": "ResNet34 - Resolution 64",
     "resnet34_imagenet100_128": "ResNet34 - Resolution 128",
     "resnet34_imagenet100_224": "ResNet34 - Resolution 224",
+    "vgg13_imagenet100_32": "VGG13_32",
+    "vgg13_imagenet100_64": "VGG13_64",
+    "vgg13_imagenet100_128": "VGG13_128",
+    "vgg13_imagenet100_224": "VGG13_224",
+    "vgg13_imagenet_class_10": "VGG13 - 10 Classes",
+    "vgg13_imagenet_class_50": "VGG13 - 50 Classes",
+    "vgg13_imagenet_class_100": "VGG13 - 100 Classes",
 }
+
 
 data_name_convert = {
     "cifar10": "CIFAR-10",
     "cifar100": "CIFAR-100",
-    "imagenet": "ImageNet-1K",
-    "imagenet100": "ImageNet-100",
-    "places": "Places-365",
+    "imagenet": "ImageNet",
+    "imagenet100": "ImageNet",
+    "places": "Places",
     "ninco": "NINCO",
 }
 
@@ -506,7 +514,7 @@ def plot_change_ranks(model_name, pretrained_data):
     plt.figure(figsize=(8, 6))
     plt.plot(percentage)
     plt.ylabel("Change in Rank [%]")
-    plt.xlabel(f"{model_name_convert[model_name]} Layers")
+    plt.xlabel("Layer")
     plt.grid(axis="both")
     plt.savefig(f"{model_name}_{pretrained_data}_change_in_rank.png", dpi=300)
 
@@ -525,7 +533,7 @@ def plot_random_ranks(model_name, pretrained_data):
     plt.plot(random_ranks)
     plt.title(f"{model_name_convert[model_name]} - random init")
     plt.ylabel("Effective Rank")
-    plt.xlabel(f"{model_name_convert[model_name]} Layers")
+    plt.xlabel("Layers")
     plt.grid()
     plt.savefig(f"{model_name}_{pretrained_data}_random_ranks.png", dpi=300)
 
@@ -549,7 +557,13 @@ def plot_acc(
     add_title=False,
     normalize=False,
 ):
-    # get mean and std for ID and OOD
+    ID_COLOR = "#377EB8"
+    OOD_COLOR = "#4DAF4A"
+    OOD_2_COLOR = "#A65628"
+    RANK_COLOR = "#E41A1C"
+
+    save_dir = f"plots/{ID_data_name}/acc_rank"
+
     ood_means, ood_stds = get_mean_std(ID_data_name, OOD_data_name, model_name)
     ood_means_2, ood_stds_2 = get_mean_std(ID_data_name, OOD_data_name2, model_name)
 
@@ -572,7 +586,8 @@ def plot_acc(
         # ranks = get_original_ranks(singular_values)
 
     fig, ax1 = plt.subplots(figsize=(10, 6))
-
+    plt.rc("font", size=17, weight="bold")
+    # label font size
     if len(ood_means) > 40:
         plt.xticks(
             range(1, len(ood_means) + 1, 3),
@@ -592,28 +607,42 @@ def plot_acc(
     OOD_data_name = data_name_convert[OOD_data_name]
     OOD_data_name2 = data_name_convert[OOD_data_name2]
 
+    # plot ID
+    ax1.plot(range(1, len(id_means) + 1), id_means, label=f"ID({ID_data_name})", color=ID_COLOR)
+    ax1.fill_between(
+        range(1, len(id_means) + 1),
+        id_means - id_stds,
+        id_means + id_stds,
+        alpha=0.2,
+        color=ID_COLOR,
+    )
+
     # plot OOD1
     ax1.plot(
-        range(1, len(ood_means) + 1), ood_means, label=f"OOD({OOD_data_name})", color="#4DAF4A"
+        range(1, len(ood_means) + 1), ood_means, label=f"OOD({OOD_data_name})", color=OOD_COLOR
     )
     ax1.fill_between(
-        range(1, len(ood_means) + 1), ood_means - ood_stds, ood_means + ood_stds, alpha=0.2
+        range(1, len(ood_means) + 1),
+        ood_means - ood_stds,
+        ood_means + ood_stds,
+        alpha=0.2,
+        color=OOD_COLOR,
     )
 
     # plot OOD2
-    # ax1.plot(
-    #     range(1, len(ood_means_2) + 1), ood_means_2, label=f"OOD({OOD_data_name2})", color="#A65628"
-    # )
-    # ax1.fill_between(
-    #     range(1, len(ood_means_2) + 1),
-    #     ood_means_2 - ood_stds_2,
-    #     ood_means_2 + ood_stds_2,
-    #     alpha=0.2,
-    # )
-
-    # plot ID
-    ax1.plot(range(1, len(id_means) + 1), id_means, label=f"ID({ID_data_name})", color="#377EB8")
-    ax1.fill_between(range(1, len(id_means) + 1), id_means - id_stds, id_means + id_stds, alpha=0.2)
+    ax1.plot(
+        range(1, len(ood_means_2) + 1),
+        ood_means_2,
+        label=f"OOD({OOD_data_name2})",
+        color=OOD_2_COLOR,
+    )
+    ax1.fill_between(
+        range(1, len(ood_means_2) + 1),
+        ood_means_2 - ood_stds_2,
+        ood_means_2 + ood_stds_2,
+        alpha=0.2,
+        color=OOD_2_COLOR,
+    )
 
     y_start = min(min(ood_means), min(id_means)) - 1
     ax1.set_ylim(bottom=y_start)
@@ -633,8 +662,8 @@ def plot_acc(
     if tunnel_start is not None:
         plt.axvspan(tunnel_start, len(ood_means), alpha=0.2, color="green")
 
-    ax1.set_ylabel("Top-1 Accuracy [%]")
-    plt.xlabel(f"{model_name_convert[model_name]} Layer")
+    ax1.set_ylabel("Top-1 Accuracy [%]", size=20)
+    plt.xlabel(f"Layer", size=20)
     if add_rank:
         ax2 = ax1.twinx()
         ax2.plot(range(1, len(ranks) + 1), ranks, label="Rank", color="#E41A1C", linestyle="dashed")
@@ -642,10 +671,10 @@ def plot_acc(
         ax2.set_ylim(bottom=0)
         lines = ax1.get_lines() + ax2.get_lines()
         labels = [line.get_label() for line in lines]
-        plt.legend(lines, labels, loc="best", frameon=True, framealpha=0.6, ncol=2)
+        plt.legend(lines, labels, loc="upper left", frameon=True, framealpha=0.6)
 
     else:
-        plt.legend(loc="best", frameon=True, framealpha=0.6, ncol=2)
+        plt.legend(loc="upper left", frameon=True, framealpha=0.6)
     plt.xlim(left=1, right=len(ood_means))
     plt.ylim(bottom=0)
 
@@ -653,13 +682,12 @@ def plot_acc(
     # yticks = list(plt.yticks()[0])[1:-1]
     # plt.yticks(yticks)
 
-    save_dir = f"plots/{ID_data_name}/acc_rank/"
-
     if not os.path.exists(os.path.dirname(save_dir)):
         os.makedirs(os.path.dirname(save_dir))
 
-    file_name = f"{model_name}{'_title' if add_title else ''}{'_normalized' if normalize else ''}_places.png"
-
+    file_name = (
+        f"{model_name}{'_title' if add_title else ''}{'_normalized' if normalize else ''}.png"
+    )
     if add_title:
         plt.title(f"{model_name_convert[model_name]} - {ID_data_name}")
     plt.savefig(f"{save_dir}/{file_name}", dpi=300)
@@ -677,13 +705,15 @@ if __name__ == "__main__":
     # projection_error = torch.load("values/errors/resnet34/projection_32768.pt")
     # plot_error_dimension("resnet34", 32768, original=True, download=True)
 
-    model_names = [
-        # "resnet34_imagenet100_32",
-        # "resnet34_imagenet100_64",
-        # "resnet34_imagenet100_128",
-        # "resnet34_imagenet100_224",
-        "resnet34"
-    ]
+    # model_names = [
+    #     "vgg13_imagenet100_32",
+    #     "vgg13_imagenet100_64",
+    #     "vgg13_imagenet100_128",
+    #     "vgg13_imagenet100_224",
+    # ]
+
+    model_names = ["resnet50", "resnet50_swav", "convnext", "dino", "mae", "mugs", "swin", "vit"]
+    # model_names = ["resnet50"]
     for model_name in model_names:
         id_data = "imagenet"
         ood_data = "places"
@@ -696,7 +726,7 @@ if __name__ == "__main__":
             model_name,
             tunnel_start,
             add_rank=False,
-            add_title=True,
+            add_title=False,
             normalize=False,
         )
 

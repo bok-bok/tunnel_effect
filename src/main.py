@@ -38,6 +38,7 @@ if __name__ == "__main__":
     model_name, pretrained_data, data_name, batch_size, main_device, classifier_device = parser()
     pretrained = True
     resolution = 224
+    class_num = 100
 
     if "imagenet100" in model_name:
         if "32" in model_name:
@@ -61,7 +62,7 @@ if __name__ == "__main__":
     model.to(main_device)
 
     train_dataloader, test_dataloader = get_data_loader(
-        data_name, batch_size=batch_size, resolution=resolution
+        data_name, 200, 100, class_num=class_num, batch_size=batch_size, resolution=resolution
     )
 
     # start = time.time()
