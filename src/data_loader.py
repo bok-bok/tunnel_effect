@@ -13,7 +13,10 @@ IMAGENET_DIR = "/data/datasets/ImageNet2012"
 # IMAGENET_DIR = "/home/tyler/data/ImageNet2012"
 
 NINCO_DIR = "data/NINCO/NINCO_OOD_classes"
-IMAGENET_100_DIR = "/data/datasets/ImageNet-100"
+# IMAGENET_100_DIR = "/data/datasets/ImageNet-100"
+IMAGENET_100_DIR = "/home/tolga/data/imagenet100"
+
+
 
 DIR_DICT = {
     "places": PLACE_DIR,

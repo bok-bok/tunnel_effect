@@ -1,96 +1,141 @@
-
+import os
 import argparse
-from transformers import ViTConfig,ViTModel, ViTForImageClassification
 
+from tqdm import tqdm
+
+
+import torch
+from torch import nn, optim
+from torch.cuda.amp import GradScaler, autocast
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.utils.data import DataLoader, Dataset, Subset, SubsetRandomSampler
 
 from torchvision import datasets, transforms
-from torch.utils.data import DataLoader, Dataset, Subset, SubsetRandomSampler
+from transformers import ViTConfig,ViTModel, ViTForImageClassification
+
+from data_loader import get_data_loader, get_ImageNet100_dataloader
+# from utils.utils import EarlyStopper
 
 IMAGENET_100_DIR = "/home/tolga/data/imagenet100"
 
-class Imagenet100DataModule(pl.LightningDataModule):
-    def __init__(self, resolution_size, batch_size, num_workers, classes_num=None, use_all=True):
-        super().__init__()
-        
-        self.train_dir = os.path.join(IMAGENET_100_DIR, "train")
-        self.test_dir  = os.path.join(IMAGENET_100_DIR, "val")
-        
-        self.resolution_size = resolution_size
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.classes_num = classes_num
-        self.use_all = use_all
-        
-    def get_ImageNet100_transforms(self,image_size):
-        train_transform = transforms.Compose(
-            [
-                transforms.Resize((image_size, image_size)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ]
+
+
+def train(args, model, train_dataloader, test_dataloader):
+    
+    device = args.gpu
+    learning_rate = args.lr
+    weight_decay = args.wd
+    epochs = args.epochs
+    
+    save_dir = f"weights/ViT/vit_{args.img_size}/{str(learning_rate) + '_' + str(weight_decay)}"
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    model_name = f"{args.img_size}"
+
+    # scaler = GradScaler()
+    # early_stopper = EarlyStopper(patience=10)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    scheduler = CosineAnnealingLR(optimizer, epochs, eta_min=0, last_epoch=-1)
+
+    criterion = torch.nn.CrossEntropyLoss()
+    model.to(device)
+    for epoch in range(1, epochs + 1):
+        model.train()
+        running_loss = 0.0
+        correct = 0
+        for data, target in train_dataloader:
+            data, target = data.to(device), target.to(device)
+
+            # with autocast():
+            #     output = model(data)
+            #     loss = criterion(output, target)
+
+            # optimizer.zero_grad()
+
+            # scaler.scale(loss).backward()
+            # scaler.step(optimizer)
+            # scaler.update()
+
+            output = model(data)
+            loss = criterion(output, target)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            correct += output.argmax(dim=1).eq(target).sum().item()
+            running_loss += loss.item() * data.size(0)
+
+        running_loss = running_loss / len(train_dataloader.dataset)
+        train_acc = round(100.0 * correct / len(train_dataloader.dataset), 2)
+        val_loss, test_acc = validate(model, test_dataloader, criterion, device)
+        print(
+            f"epoch: {epoch} | loss: {running_loss:.2f} |val_L :{val_loss:.2f} | acc: {train_acc}% | test_acc: {test_acc}%"
         )
-        test_transform = transforms.Compose(
-            [
-                transforms.Resize((image_size, image_size)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ]
-        )
-        return train_transform, test_transform
+        if epoch % 10 == 0:
+            torch.save(model.state_dict(), f"{save_dir}/{model_name}_{epoch}_{test_acc}.pth")
 
-    def setup(self, stage=None):
-        
-        data_name = "imagenet100"
-        train_transform, test_transform = self.get_ImageNet100_transforms(self.resolution_size)
-        
-        train_dataset = datasets.ImageFolder(root = self.train_dir, transform = train_transform)
-        
-        
-        if stage == "fit":
-            train_samples_per_class = 200 if self.use_all else None
-            train_dataset  = datasets.ImageFolder(root = self.train_dir,  transform = train_transform)
-            train_indices = get_balanced_indices(train_dataset, data_name, "train", train_samples_per_class, self.classes_num)
-            print(f"train indices: {len(train_indices)}")
-            self.train_subset = Subset(train_dataset, train_indices)
+        # check early stop
+        # if early_stopper.early_stop(val_loss):
+        #     print("Early stopping")
+        #     break
 
-        
-        if stage == "test":
+        if scheduler is not None:
+            scheduler.step()
+    torch.save(model.state_dict(), f"{save_dir}/{model_name}_{epoch}_{test_acc}.pth")
 
-            test_samples_per_class = 50 if self.use_all else None
-            test_dataset  = datasets.ImageFolder(root = self.test_dir,  transform = test_transform)
-            test_indices = get_balanced_indices(test_dataset, data_name, "val", test_samples_per_class, self.classes_num)
-            print(f"test indices: {len(test_indices)}")
-            self.test_subset = Subset(test_dataset, test_indices)
 
-        
-        if stage == "predict":
-            pass
+def validate(model, test_dataset, criterion, device):
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    with torch.no_grad():
+        for data, target in test_dataset:
+            data, target = data.to(device), target.to(device)
+            output = model(data)
+            correct += output.argmax(dim=1).eq(target).sum().item()
+            loss = criterion(output, target)
+            running_loss += loss.item() * data.size(0)
 
-    def train_dataloader(self):
-        return DataLoader(self.train_subset, batch_size = self.batch_size, shuffle=True, num_workers=4)
+    # print accuracy and loss for a epoch
+    acc = round(100.0 * correct / len(test_dataset.dataset), 2)
+    running_loss = running_loss / len(test_dataset.dataset)
+    # print(f"validation ----- loss: {running_loss:.4f} | acc: {acc}%")
+    return running_loss, acc
 
-    def test_dataloader(self):
-        return DataLoader(self.test_subset, batch_size = self.batch_size, shuffle=False, num_workers=4)
 
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='ViT Trainer')
     
-    parser.add_argument("--dataset")
-    parser.add_argument("--img_size", type=int)
-    parser.add_argument("--patch_size", type=int)
-    parser.add_argument("--batch_size", type=int)
-    parser.add_argument("--lr", type=float)
+    parser.add_argument("--img_size", type=int, default = 224)
+    parser.add_argument("--patch_size", type=int,default = 8)
+    parser.add_argument("--batch_size", type=int, default = 256)
+    parser.add_argument("--lr", type=float, default = 0.1)
     parser.add_argument("--epochs", type=int)
-    parser.add_argument("--num_labels", type=int)
+    parser.add_argument("--num_labels", type=int, default = 100)
+    parser.add_argument("--wd", type=float, default = 0.001)
+    parser.add_argument("--gpu", type=int, default = 0)
     
     args = parser.parse_args()
+        
+    train_dataloader, test_dataloader = get_ImageNet100_dataloader(resolution_size = args.img_size,
+                                                                   batch_size = args.batch_size,
+                                                                   classes_num = args.num_labels,
+                                                                   use_all = False)
     
     config = ViTConfig(image_size = args.img_size, 
                        patch_size = args.patch_size, 
                        num_labels = args.num_labels)
     
     vit_model = ViTForImageClassification(config)
+    
+    train(args,vit_model,train_dataloader,test_dataloader)
+
+
+    
+    # trainer = pl.Trainer(accelerator='auto',devices='auto')
+    # trainer.fit(vit_model,train_dataloaders=train_dataloader,val_dataloaders=test_dataloader)
+    
     
     
     
