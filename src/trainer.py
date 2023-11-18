@@ -32,22 +32,21 @@ def train(model, device, train_dataset, test_dataset, learning_rate, weight_deca
         correct = 0
         for data, target in train_dataset:
             data, target = data.to(device), target.to(device)
+            with autocast():
+                output = model(data)
+                loss = criterion(output, target)
 
-            # with autocast():
-            #     output = model(data)
-            #     loss = criterion(output, target)
-
-            # optimizer.zero_grad()
-
-            # scaler.scale(loss).backward()
-            # scaler.step(optimizer)
-            # scaler.update()
-
-            output = model(data)
-            loss = criterion(output, target)
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
+            # output = model(data)
+            # loss = criterion(output, target)
+            # optimizer.zero_grad()
+            # loss.backward()
+            # optimizer.step()
 
             correct += output.argmax(dim=1).eq(target).sum().item()
             running_loss += loss.item() * data.size(0)
