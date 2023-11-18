@@ -470,18 +470,14 @@ def get_clip(pretrained=True):
 
 
 image100_pretrained_weights = {
-    32: "0.1_0.9_0.001_40",
-    64: "0.1_0.9_0.002_40",
-    128: "0.1_0.9_0.003_40",
-    224: "0.1_0.9_0.003_45",
+    32: "0.01_0.0/32_20_41.74.pth",
+    # 32: "0.01_0.0/32_31_45.98.pth",
+    64: "0.01_0.005/64_10_49.84.pth",
+    # 64: "0.01_0.005/64_20_58.28.pth",
+    128: "0.01_0.001/128_10_57.24.pth",
+    224: "0.01_0.001/224_10_64.24.pth",
 }
 
-
-def get_vgg_imagenet100(resolution_size, pretrained=True):
-    model = VGG("VGG13")
-    if pretrained:
-        pass
-    return model
 
 def get_resnet34_imagenet100(resolution_size, pretrained=True):
     model = resnet34(weights=None)
@@ -508,4 +504,57 @@ def get_resnet34_imagenet100(resolution_size, pretrained=True):
             torch.load(f"weights/resnet34_imagenet100/{resolution_size}/{file_name}.pth")
         )
 
+    return model
+
+
+def get_vgg13_imagenet100(model_name, pretrained=True):
+    if "32" in model_name:
+        resolution_size = 32
+    elif "64" in model_name:
+        resolution_size = 64
+    elif "128" in model_name:
+        resolution_size = 128
+    elif "224" in model_name:
+        resolution_size = 224
+    else:
+        raise ValueError("resolution not found")
+    model = VGG("VGG13")
+    if pretrained:
+        print(f"loading vgg13 imagenet100 {resolution_size} pretrained")
+        file_name = image100_pretrained_weights[resolution_size]
+        print(f"loading {file_name}")
+        model.load_state_dict(torch.load(f"weights/vgg13/{resolution_size}/{file_name}"))
+
+    return model
+
+
+VGG13_pretrained_weights_by_class_num = {
+    10: "0.001_0.0001/10_60_62.0.pth",
+    50: "0.0001_0.0/50_30_36.96.pth",
+    100: "0.0001_0.0/100_30_23.64.pth",
+    1000: "1e-05_0.0/1000_20_1.13.pth",
+}
+
+
+def get_vgg13_by_class_num(class_num, pretrained=True):
+    if class_num not in [10, 50, 100, 1000]:
+        raise ValueError("class num not found")
+    # model = VGG("VGG13", class_num=class_num)
+    model = models.vgg13_bn(weights=None)
+    model.classifier[6] = nn.Linear(4096, class_num)
+
+    def initialize_weights(m):
+        if isinstance(m, nn.Conv2d):
+            nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+        elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+            nn.init.constant_(m.weight, 1)
+            nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.Linear):
+            nn.init.xavier_normal_(m.weight)
+
+    model.apply(initialize_weights)
+
+    if pretrained:
+        file_name = VGG13_pretrained_weights_by_class_num[class_num]
+        model.load_state_dict(torch.load(f"weights/vgg13/{class_num}/{file_name}"))
     return model
