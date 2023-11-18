@@ -7,6 +7,7 @@ from abc import ABCMeta, abstractmethod
 import numpy as np
 import torch
 from flowtorch.analysis import SVD
+from sklearn.metrics.pairwise import euclidean_distances
 from timm.models.vision_transformer import Block
 from torch import nn, optim
 from torchvision.models.swin_transformer import SwinTransformerBlock
@@ -14,8 +15,10 @@ from torchvision.models.vision_transformer import EncoderBlock
 from tqdm import tqdm
 
 from models.models import IterativeKNN
+from prac import average_pairwise_cosine_distance
 from utils.utils import (
     compute_X_reduced,
+    computeNC1,
     get_size,
     mean_center,
     random_projection_method,
@@ -55,7 +58,8 @@ class Analyzer(metaclass=ABCMeta):
             self.b = 8192
         else:
             self.dummy_data = torch.randn(1, 3, 224, 224, dtype=torch.float32)
-            self.b = 13000
+            # self.b = 13000
+            self.b = 8192
 
         if self.data_name in ["cifar10", "imagenet", "imagenet100"]:
             self.OOD = False
@@ -118,9 +122,9 @@ class Analyzer(metaclass=ABCMeta):
         #     patch_size = 4
         print(f"resolution: {resolution}")
         print(f"data name: {self.data_name}")
-        if self.data_name == "imagenet100" and resolution == 224:
-            patch_size = 6
-        elif resolution == 224 or resolution == 128:
+        if resolution == 224:
+            #     patch_size = 6
+            # elif resolution == 128:
             patch_size = 4
         else:
             patch_size = 2
@@ -128,19 +132,27 @@ class Analyzer(metaclass=ABCMeta):
         print(f"patch size: {patch_size}")
 
         def hook_vectorization_helper(module, input, output):
-            output = vectorize_global_avg_pooling(output, patch_size)
+            output = vectorize_global_avg_pooling(
+                output, patch_size, normalize=True, device=self.classifier_device
+            )
             self.representations.append(output)
 
         return hook_vectorization_helper
 
     def hook_compute_vectorized_singular_values(self, patch_size=2):
-        if self.data_name in ["places", "imagenet"]:
+        if self.data_name in ["places", "imagenet", "imagenet100"]:
             patch_size = 4
+        print(f"patch size: {patch_size}")
 
         def hook_compute_vectorzed_singular_values_helper(module, input, output):
-            output = vectorize_global_avg_pooling(output, patch_size).T
+            output = vectorize_global_avg_pooling(
+                output, patch_size, normalize=False, device=self.main_device
+            ).T
+
             print(f"output size : {output.size()}")
-            output = output.to(self.classifier_device)
+            # output = output.to(self.classifier_device)
+            singular_values = random_projection_method(output, self.b, self.classifier_device)
+
             singular_values = torch.linalg.svdvals(output).detach().cpu()
             squared_s = singular_values**2
             print(squared_s[:10])
@@ -162,10 +174,14 @@ class Analyzer(metaclass=ABCMeta):
         output = self.preprocess_output(output).T
         if output.size(1) == 1:
             return
-
-        print(f"output shape: {output.size()}")
+        output = output.to(torch.float16)
+        print(f"output shape: {output.size()} {output.dtype}")
         d = output.size(0)
         N = output.size(1)
+        # skip too large layersk
+        if d > 1605632:
+            print(f"skip layer : {d}")
+            return
         if d <= N:
             print(f"use full matrix : {output.size()}")
             output = output.to(self.classifier_device)
@@ -182,6 +198,116 @@ class Analyzer(metaclass=ABCMeta):
         del input
         del output
         self.singular_values.append(singular_values)
+
+    def hook_compute_NC1(self, module, input, output):
+        # output : (feature, sample)
+        output = self.preprocess_output(output).T
+
+        if output.size(1) == 1:
+            return
+        print(f"output shape: {output.size()}")
+        _, _, nc1 = computeNC1(self.labels, output)
+        print(nc1)
+        self.nc1_data.append(nc1)
+
+    def hook_compute_NC2(self, module, input, output):
+        # output = self.preprocess_output(output).T
+        print(f"output shape: {output.size()} {output.dtype}")
+
+        # if output.size(1) == 1:
+        #     return
+        # nc2 = self.computeNC2(self.labels, output)
+        nc2 = average_pairwise_cosine_distance(output)
+        print(nc2)
+
+        self.nc2_data.append(nc2)
+
+    def computeNC2(self, labels, embeddings):
+        """
+        Computes the NC2 condition for the embeddings, which includes the mean of the adjusted cosine similarity
+        between the class means and their standard deviation.
+
+        Parameters:
+        labels (torch.Tensor): A vector of labels.
+        embeddings (torch.Tensor): A d x num_samples matrix of d-dimensional embeddings.
+
+        Returns:
+        float: The mean of 1 / (1 - C) + the cosine similarity for all class mean pairs.
+        float: The standard deviation of the cosine similarities for all class mean pairs.
+        """
+        # Calculate class means (mu_c)
+        unique_classes = labels.unique()
+        class_means = torch.stack([embeddings[:, labels == c].mean(dim=1) for c in unique_classes])
+
+        # Center the class means
+        mu_G = class_means.mean(dim=0)
+        centered_class_means = class_means - mu_G
+
+        # Normalize the centered class means to get the simplex ETF structure vectors
+        simplex_vectors = centered_class_means / torch.norm(
+            centered_class_means, dim=1, keepdim=True
+        )
+
+        # Compute pairwise cosine similarity for all class mean pairs
+        cosine_similarities = torch.mm(simplex_vectors, simplex_vectors.t())
+
+        # Exclude self-similarity by filling the diagonal with zeros
+        cosine_similarities.fill_diagonal_(0)
+
+        # Adjust the cosine similarities according to the NC2 condition
+        C = unique_classes.size(0)
+        adjusted_cosine_similarities = 1 / (C - 1) + cosine_similarities
+        # adjusted_cosine_similarities = cosine_similarities
+
+        # Compute mean and standard deviation for the upper triangle of the adjusted cosine matrix
+        # to avoid counting pairs twice and including the diagonal
+        upper_triangle_indices = torch.triu_indices(row=C, col=C, offset=1)
+        mean_similarity = (
+            adjusted_cosine_similarities[upper_triangle_indices[0], upper_triangle_indices[1]]
+            .mean()
+            .item()
+        )
+        # std_similarity = (
+        #     adjusted_cosine_similarities[upper_triangle_indices[0], upper_triangle_indices[1]]
+        #     .std()
+        #     .item()
+        # )
+        print(mean_similarity.dtype)
+        return mean_similarity
+
+    def hook_compute_nearest_mean_prediction(self, module, input, output):
+        output = self.preprocess_output(output)
+        print(f"output shape: {output.size()}")
+        if output.size(1) == 1:
+            return
+
+        class_means, _ = self.get_class_means_nums(output, self.labels)
+        prediction = self.nearest_class_mean_classifier(output, class_means)
+        del output
+        self.closest_class_predictions.append(prediction)
+
+    def get_class_means_nums(self, output, labels):
+        class_means = []
+        class_nums = []
+        if self.data_name == "imagenet":
+            class_counts = 1000
+        elif self.data_name == "cifar10":
+            class_counts = 10
+        elif self.data_name == "places":
+            class_counts = 365
+        elif self.data_name == "imagenet100":
+            class_counts = 100
+        for i in range(class_counts):
+            means = torch.mean(output[labels == i], dim=0)
+            class_means.append(torch.mean(output[labels == i], dim=0))
+            class_nums.append(torch.sum(labels == i))
+        return class_means, class_nums
+
+    def nearest_class_mean_classifier(self, embeddings, class_means):
+        distances = euclidean_distances(embeddings, class_means)
+        prediction = np.argmin(distances, axis=1)
+        print(f"prediction shape: {prediction.shape}")
+        return prediction
 
     def save_dimensions(self):
         # self.register_full_hooks()
@@ -247,12 +373,6 @@ class Analyzer(metaclass=ABCMeta):
             self.classifiers.append(cur_classifier)
             self.optimizers.append(cur_optim)
 
-    def init_knns(self):
-        self.knns = []
-        for i, layer in enumerate(self.layers):
-            cur_knn = IterativeKNN(n_neighbors=5)
-            self.knns.append(cur_knn)
-
     def check_folder(self, path):
         if not os.path.exists(path):
             os.makedirs(path)
@@ -265,11 +385,11 @@ class Analyzer(metaclass=ABCMeta):
         # reset representations
         self.singular_values = []
         self.representations = []
+        self.closest_class_predictions = []
+        self.class_means = []
         input = input.to(self.main_device)
-        if self.name == "clip":
-            _ = self.model.encode_image(input)
-        else:
-            _ = self.model(input)
+        output = self.model(input)
+        return output
 
     def download_singular_values(self, input_data, specific_data_name, GAP=False, pretrained=True):
         self.model.to(self.main_device)
@@ -321,37 +441,6 @@ class Analyzer(metaclass=ABCMeta):
         self.main_device = main_device
         self.model.to(self.main_device)
         self.classifier_device = classifier_device
-
-    def download_knn_accuracy(
-        self, train_data_loader, test_dataloader, OOD, feature_type="original", normalize=False
-    ):
-        if feature_type != "original":
-            print(f"feature type: {feature_type}")
-            self.register_hooks(self.hook_vectorization(feature_type, normalize))
-        else:
-            self.register_hooks(self.hook_full)
-        self.init_knns()
-        for data, target in tqdm(train_data_loader):
-            self.forward(data)
-            for representation, knn in zip(self.representations, self.knns):
-                knn.update(representation, target)
-
-        for knn in self.knns:
-            knn.train()
-        accuracies = []
-
-        for data, target in test_dataloader:
-            self.forward(data)
-            for representation, knn in zip(self.representations, self.knns):
-                knn.predict(representation, target)
-
-        for knn in self.knns:
-            accuracies.append(knn.get_accuracy())
-
-        print(f"accuracy: {accuracies}")
-        save_dir = f"values/{'cifar10' if 'cifar' in self.data_name else 'imagenet'}/{'knn_acc' if not self.OOD else 'knn_ood_acc'}/"
-        self.check_folder(save_dir)
-        torch.save(accuracies, f"{save_dir}/{self.name}_{'norm' if normalize else ''}.pt")
 
     def download_accuarcy(self, train_dataloader, test_dataloader, pretrained_data, resolution):
         # create folder
@@ -430,6 +519,67 @@ class Analyzer(metaclass=ABCMeta):
         print(f"accuracy: {accuracies}")
         return accuracies
         # plot accuracy
+
+    def download_NC1(self, features, labels):
+        self.labels = labels
+        self.nc1_data = []
+        base_path = f"values/{self.data_name}/NC1"
+        self.check_folder(base_path)
+        self.register_hooks(self.hook_compute_NC1)
+
+        _ = self.forward(features)
+        torch.save(self.nc1_data, f"{base_path}/{self.name}.pt")
+
+    def download_NC4(self, features, labels):
+        self.labels = labels
+        base_path = f"values/{self.data_name}/NC4"
+        self.check_folder(base_path)
+
+        self.closest_class_predictions = []
+        self.register_hooks(self.hook_compute_nearest_mean_prediction)
+        output = self.forward(features)
+        dnn_prediction = output.argmax(dim=1).detach().cpu().numpy()
+        accuracies = []
+        for prediction in self.closest_class_predictions:
+            acc = np.mean(prediction == dnn_prediction)
+            print(acc)
+            accuracies.append(acc)
+        torch.save(accuracies, f"{base_path}/{self.name}.pt")
+
+    def download_NC2(self, features, labels):
+        self.labels = labels
+        base_path = f"values/{self.data_name}/NC2"
+        self.check_folder(base_path)
+        self.nc2_data = []
+        self.register_hooks(self.hook_compute_NC2)
+        self.forward(features)
+
+        torch.save(self.nc2_data, f"{base_path}/{self.name}.pt")
+
+    def check_simplex_etf_structure(self, class_means: np.ndarray) -> (bool, float):
+        # class_means : (num_classes, num_features)
+        num_classes = class_means.shape[0]
+        global_mean = np.mean(class_means, axis=0)
+
+        # Centering the class means
+        centered_class_means = class_means - global_mean
+
+        # Normalizing centered class means to unit length
+        normalized_class_means = centered_class_means / np.linalg.norm(
+            centered_class_means, axis=1, keepdims=True
+        )
+
+        # Dot product matrix
+        dot_product_matrix = np.dot(normalized_class_means, normalized_class_means.T)
+
+        # Extract the lower triangular part of the matrix, excluding the diagonal
+        lower_triangular = dot_product_matrix[np.tril_indices(num_classes, -1)]
+
+        # Compute the ETF metric
+        etf_metric = np.mean(lower_triangular)
+
+        result = (1 / (1 - num_classes)) - etf_metric
+        return result
 
 
 class VGGAnalyzer(Analyzer):
