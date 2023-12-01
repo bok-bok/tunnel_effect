@@ -6,6 +6,7 @@ import torchvision
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset, Subset, SubsetRandomSampler
 from torchvision import datasets, transforms
+from torchvision.transforms import InterpolationMode
 
 PLACE_DIR = "/data/datasets/Places/places365_standard/small_easyformat"
 IMAGENET_DIR = "/data/datasets/ImageNet1K"
@@ -13,10 +14,8 @@ IMAGENET_DIR = "/data/datasets/ImageNet2012"
 # IMAGENET_DIR = "/home/tyler/data/ImageNet2012"
 
 NINCO_DIR = "data/NINCO/NINCO_OOD_classes"
-# IMAGENET_100_DIR = "/data/datasets/ImageNet-100"
-IMAGENET_100_DIR = "/home/tolga/data/imagenet100"
-
-
+IMAGENET_100_DIR = "/data/datasets/ImageNet-100"
+# IMAGENET_100_DIR = "/home/tolga/data/imagenet100"
 
 DIR_DICT = {
     "places": PLACE_DIR,
@@ -40,11 +39,16 @@ def get_data_loader(
             return get_CIFAR_100_data_loader(train_transform, test_transform, batch_size)
         elif "10" in dataset_name:
             return get_CIFAR_data_loader(train_transform, test_transform, batch_size)
+
     elif dataset_name == "ninco":
         print("loading ninco data")
-        return get_NINCO_dataloader(100, 100, batch_size, resolution)
+        return get_NINCO_dataloader(
+            None, None, class_num, batch_size=batch_size, resolution=resolution
+        )
+
     elif dataset_name == "imagenet100":
         return get_ImageNet100_dataloader(resolution, batch_size, 100, use_all=False)
+
     elif dataset_name == "imagenet" or dataset_name == "places":
         if dataset_name == "places":
             train_samples_per_class = 100
@@ -65,6 +69,19 @@ def get_data_loader(
 
     else:
         raise ValueError("dataset name not supported")
+
+
+def get_imagenet_dataloader(class_num, train_sample_per_class, batch_size=512, resolution=32):
+    train_dataset, test_dataset = get_balanced_dataset(
+        "imagenet", train_sample_per_class, 50, class_num, resolution=resolution
+    )
+    train_dataloader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True
+    )
+    test_dataloader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True
+    )
+    return train_dataloader, test_dataloader
 
 
 def get_CIFAR_100_data_loader(train_transform, test_transform, batch_size=512, use_previous=False):
@@ -153,6 +170,7 @@ def get_balanced_dataset(
     train_dir = os.path.join(dataset_dir, "train")
     val_dir = os.path.join(dataset_dir, "val")
     train_transform, test_transform = get_imagenet_transforms(resolution)
+    # train_transform, test_transform = get_down_up_transforms()
 
     # create dataset
     train_dataset = datasets.ImageFolder(root=train_dir, transform=train_transform)
@@ -174,12 +192,86 @@ def get_balanced_dataset(
     return train_dataset, test_dataset
 
 
+def get_down_up_transforms():
+    train_transform = transforms.Compose(
+        [
+            transforms.Resize((32, 32)),
+            transforms.Resize(
+                (224, 224), interpolation=InterpolationMode.BILINEAR
+            ),  # Upsample to 224x224 using bilinear interpolation
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+    test_transform = transforms.Compose(
+        [
+            transforms.Resize((32, 32)),
+            transforms.Resize(
+                (224, 224), interpolation=InterpolationMode.BILINEAR
+            ),  # Upsample to 224x224 using bilinear interpolation
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+
+    return train_transform, test_transform
+
+
+def get_down_up_sampled_Imagenet100_dataloader(batch_size=512, classes_num=100, use_all=False):
+    train_dir = os.path.join(IMAGENET_100_DIR, "train")
+    test_dir = os.path.join(IMAGENET_100_DIR, "val")
+
+    transform = transforms.Compose(
+        [
+            transforms.Resize((32, 32)),
+            transforms.Resize(
+                (224, 224), interpolation=InterpolationMode.BILINEAR
+            ),  # Upsample to 224x224 using bilinear interpolation
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+    train_dataset = datasets.ImageFolder(root=train_dir, transform=transform)
+    test_dataset = datasets.ImageFolder(root=test_dir, transform=transform)
+
+    if use_all:
+        train_dataloader = DataLoader(
+            train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True
+        )
+        test_dataloader = DataLoader(
+            test_dataset, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True
+        )
+        return train_dataloader, test_dataloader
+    else:
+        train_samples_per_class = 200
+        test_samples_per_class = 50
+
+    data_name = "imagenet100"
+    train_indices = get_balanced_indices(
+        train_dataset, data_name, "train", train_samples_per_class, classes_num
+    )
+    test_indices = get_balanced_indices(
+        test_dataset, data_name, "val", test_samples_per_class, classes_num
+    )
+    print(f"train indices: {len(train_indices)}")
+    print(f"test indices: {len(test_indices)}")
+
+    # create subset with indices
+    train_dataset = Subset(train_dataset, train_indices)
+    test_dataset = Subset(test_dataset, test_indices)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+
+    return train_dataloader, test_dataloader
+
+
 def get_ImageNet100_dataloader(resolution_size, batch_size=512, classes_num=100, use_all=False):
     print(f"loading ImageNet100 data with resolution {resolution_size}")
     train_dir = os.path.join(IMAGENET_100_DIR, "train")
     test_dir = os.path.join(IMAGENET_100_DIR, "val")
 
     train_transform, test_transform = get_ImageNet100_transforms(resolution_size)
+    # train_transform, test_transform = get_down_up_transforms()
 
     train_dataset = datasets.ImageFolder(root=train_dir, transform=train_transform)
     test_dataset = datasets.ImageFolder(root=test_dir, transform=test_transform)
@@ -204,8 +296,12 @@ def get_ImageNet100_dataloader(resolution_size, batch_size=512, classes_num=100,
     # create subset with indices
     train_dataset = Subset(train_dataset, train_indices)
     test_dataset = Subset(test_dataset, test_indices)
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    train_dataloader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True
+    )
+    test_dataloader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True
+    )
 
     return train_dataloader, test_dataloader
 
@@ -258,13 +354,12 @@ def get_NINCO_transforms():
 
 
 def get_NINCO_dataloader(
-    train_samples_per_class, test_samples_per_class, batch_size=512, resolution=224
+    train_samples_per_class, test_samples_per_class, class_num, batch_size=512, resolution=224
 ):
-    # TODO: We need a way to sample with replacement to match samples_per_class requirement
-
     # train_transform, _ = get_NINCO_transforms()
     print(batch_size)
     train_transform, _ = get_imagenet_transforms(resolution_size=resolution)
+    # train_transform, _ = get_down_up_transforms()
 
     dset = datasets.ImageFolder(root=NINCO_DIR, transform=train_transform)
 
@@ -274,6 +369,7 @@ def get_NINCO_dataloader(
 
     train_dataset = Subset(dset, train_idx)
     valid_dataset = Subset(dset, valid_idx)
+
     print(f"train dataset: {len(train_dataset)}")
     print(f"test dataset: {len(valid_dataset)}")
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
@@ -318,15 +414,15 @@ def get_balanced_indices(dataset, dataset_name, dataset_type, samples_per_class=
     return indices
 
 
-def get_balanced_imagenet_input_data(sample_size=15000, use_previous=True):
+def get_balanced_imagenet_input_data(sample_size=15000, resolution=224,num_classes = 1000, use_previous=True):
     val_dir = os.path.join(IMAGENET_DIR, "val")
     train_dir = os.path.join(IMAGENET_DIR, "train")
-    train_transform, test_transform = get_imagenet_transforms()
+    train_transform, test_transform = get_imagenet_transforms(resolution_size=resolution)
     # val_dataset = datasets.ImageFolder(root=val_dir, transform=test_transform)
     train_dataset = datasets.ImageFolder(root=train_dir, transform=train_transform)
     # I want to get sample_size samples from val_dataset but with classes balanced
 
-    indices = get_balanced_input_indices(train_dataset, "imagenet", "val", sample_size)
+    indices = get_balanced_input_indices(train_dataset, "imagenet", "val", sample_size, num_classes)
 
     balanced_dataset = Subset(train_dataset, indices)
     balanced_dataloader = DataLoader(balanced_dataset, batch_size=sample_size, shuffle=False)
@@ -334,11 +430,11 @@ def get_balanced_imagenet_input_data(sample_size=15000, use_previous=True):
     return input_data
 
 
-def get_imagenet_input_data(sample_size=1000):
+def get_imagenet_input_data(sample_size=1000, transform=None):
     val_dir = os.path.join(IMAGENET_DIR, "val")
     train_transform, test_transform = get_imagenet_transforms()
     val_dataset = datasets.ImageFolder(root=val_dir, transform=test_transform)
-    dataloader = DataLoader(val_dataset, batch_size=sample_size, shuffle=False)
+    dataloader = DataLoader(val_dataset, batch_size=sample_size, shuffle=True)
     return next(iter(dataloader))
 
 
@@ -352,6 +448,15 @@ def get_balanced_places_input_data(sample_size=15000, use_previous=True):
     balanced_dataset = Subset(val_dataset, indices)
     balanced_dataloader = DataLoader(balanced_dataset, batch_size=sample_size, shuffle=False)
     input_data = next(iter(balanced_dataloader))[0]
+    return input_data
+
+
+def get_imagenet100_input_data(resolution, sample_size=1000):
+    test_dir = os.path.join(IMAGENET_100_DIR, "val")
+    train_transform, test_transform = get_imagenet_transforms(resolution_size=resolution)
+    test_dataset = datasets.ImageFolder(root=test_dir, transform=test_transform)
+    dataloader = DataLoader(test_dataset, batch_size=sample_size, shuffle=False)
+    input_data = next(iter(dataloader))
     return input_data
 
 
@@ -371,15 +476,22 @@ def get_balanced_imagenet100_input_data(resolution, sample_size=15000, use_previ
     return input_data
 
 
-def get_balanced_input_indices(dataset, dataset_name, dataset_type, sample_size=15000):
+def get_balanced_input_indices(
+    dataset, dataset_name, dataset_type, sample_size=15000, classes=None
+):
     if dataset_type not in ["train", "val"]:
         raise ValueError("dataset_type must be train or val")
 
-    file_dir = f"values/{dataset_name}/indices/balanced_input_{sample_size}.pt"
+    if classes is not None:
+        num_classes = classes
+    else:
+        num_classes = len(dataset.classes)
+
+    file_dir = f"values/{dataset_name}/indices/balanced_input_{sample_size}_{num_classes}.pt"
     if os.path.exists(file_dir):
         print(f"loading saved {dataset_name} balanced input indices")
         return torch.load(file_dir)
-    num_classes = len(dataset.classes)
+
     samples_per_class = sample_size // num_classes
     remainder = sample_size % num_classes
 
@@ -400,7 +512,9 @@ def get_balanced_input_indices(dataset, dataset_name, dataset_type, sample_size=
         )
         indices.extend(class_sample_indices)
 
-    torch.save(indices, f"values/{dataset_name}/indices/balanced_input_{sample_size}.pt")
+    torch.save(
+        indices, f"values/{dataset_name}/indices/balanced_input_{sample_size}_{num_classes}.pt"
+    )
     return indices
 
 
