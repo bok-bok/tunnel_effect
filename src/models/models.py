@@ -476,6 +476,9 @@ image100_pretrained_weights = {
     # 64: "0.01_0.005/64_20_58.28.pth",
     128: "0.01_0.001/128_10_57.24.pth",
     224: "0.01_0.001/224_10_64.24.pth",
+    # "down_up": "0.01_0.001/224_15_53.48.pth",
+    # "down_up" : "0.005_0.001/224_31_58.7.pth"
+    "down_up": "0.005_0.01/224_20_55.6.pth",
 }
 
 
@@ -516,6 +519,8 @@ def get_vgg13_imagenet100(model_name, pretrained=True):
         resolution_size = 128
     elif "224" in model_name:
         resolution_size = 224
+    elif "down_up" in model_name:
+        resolution_size = "down_up"
     else:
         raise ValueError("resolution not found")
     model = VGG("VGG13")
@@ -523,38 +528,96 @@ def get_vgg13_imagenet100(model_name, pretrained=True):
         print(f"loading vgg13 imagenet100 {resolution_size} pretrained")
         file_name = image100_pretrained_weights[resolution_size]
         print(f"loading {file_name}")
-        model.load_state_dict(torch.load(f"weights/vgg13/{resolution_size}/{file_name}"))
+        state_dict = torch.load(f"weights/vgg13/{resolution_size}/{file_name}")
+
+        # remove module. prefix
+        if "down_up" in model_name:
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                name = k[7:]  # remove `module.` prefix
+                new_state_dict[name] = v
+
+        model.load_state_dict(new_state_dict)
 
     return model
 
 
-VGG13_pretrained_weights_by_class_num = {
-    10: "0.001_0.0001/10_60_62.0.pth",
-    50: "0.0001_0.0/50_30_36.96.pth",
-    100: "0.0001_0.0/100_30_23.64.pth",
-    1000: "1e-05_0.0/1000_20_1.13.pth",
+def initialize_weights(m):
+    if isinstance(m, nn.Conv2d):
+        nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+    elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+        nn.init.constant_(m.weight, 1)
+        nn.init.constant_(m.bias, 0)
+    elif isinstance(m, nn.Linear):
+        nn.init.xavier_normal_(m.weight)
+
+
+# VGG11_pretrained_weights_by_sample_size = {
+#     200: "0.001/0.0001/200.pth",  # 7
+#     500: "0.001/0.0/500.pth",  # 7
+#     1000: "0.001/0.0/1000.pth",  # 6
+# }
+
+VGG11_pretrained_weights_by_sample_size = {
+    100: "0.001/0.0001/100_20_18.44.pth",
+    200: "0.001/0.0001/200_15_25.9.pth",  # 7
+    500: "0.001/0.0001/500_15_34.64.pth",
+    1000: "0.001/0.0001/1000_15_40.26.pth",
 }
 
 
-def get_vgg13_by_class_num(class_num, pretrained=True):
-    if class_num not in [10, 50, 100, 1000]:
-        raise ValueError("class num not found")
-    # model = VGG("VGG13", class_num=class_num)
-    model = models.vgg13_bn(weights=None)
-    model.classifier[6] = nn.Linear(4096, class_num)
-
-    def initialize_weights(m):
-        if isinstance(m, nn.Conv2d):
-            nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-        elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-            nn.init.constant_(m.weight, 1)
-            nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.Linear):
-            nn.init.xavier_normal_(m.weight)
-
-    model.apply(initialize_weights)
+def get_vgg11_by_sample_num(sample_per_class, pretrained=True):
+    print(f"loading vgg11 sample {sample_per_class}")
+    if sample_per_class not in [100, 200, 500, 1000]:
+        raise ValueError("sample_per_class not found")
+    model = VGG("VGG13")
 
     if pretrained:
-        file_name = VGG13_pretrained_weights_by_class_num[class_num]
-        model.load_state_dict(torch.load(f"weights/vgg13/{class_num}/{file_name}"))
+        file_name = VGG11_pretrained_weights_by_sample_size[sample_per_class]
+        print(f"loading {file_name}")
+        state_dict = torch.load(f"weights/vgg11_100/{sample_per_class}/{file_name}")
+        # state_dict = remove_module_prefix(state_dict)
+
+        model.load_state_dict(state_dict)
+    else:
+        model.apply(initialize_weights)
     return model
+
+
+VGG11_pretrained_weights_by_class_num = {
+    10: "0.001/0.0001/10_20_62.2.pth",
+    # 50: "0.001/0.0001/50_15_30.72.pth",
+    50: "0.001/0.0001/50_20_31.48.pth"
+    # 100: "0.001_0.01/100.pth",
+}
+
+
+def get_vgg11_by_class_num(class_num, pretrained=True):
+    print(f"loading vgg11 class {class_num}")
+    if class_num not in [10, 50, 100, 1000]:
+        raise ValueError("class num not found")
+    # model = models.vgg13_bn(weights=None)
+
+    # # change last layer
+    # model.classifier[6] = nn.Linear(4096, class_num)
+    model = VGG("VGG13", class_num=class_num)
+
+    # weights init
+    if pretrained:
+        file_name = VGG11_pretrained_weights_by_class_num[class_num]
+        print(f"loading {file_name}")
+        state_dict = torch.load(f"weights/vgg11_class/{class_num}/{file_name}")
+        # state_dict = remove_module_prefix(state_dict)
+
+        model.load_state_dict(state_dict)
+    else:
+        model.apply(initialize_weights)
+    return model
+
+
+def remove_module_prefix(state_dict):
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        name = k[7:]  # remove `module.` prefix
+        new_state_dict[name] = v
+    return new_state_dict
