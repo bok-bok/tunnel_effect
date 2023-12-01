@@ -3,11 +3,13 @@ import os
 import sys
 
 import matplotlib.pyplot as plt
+import numpy as np
 import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models
+from scipy.spatial.distance import cosine
 from timm.models.vision_transformer import vit_base_patch16_224
 from torchvision.models import (
     ConvNeXt_Base_Weights,
@@ -31,7 +33,8 @@ from models.models import (
     ResNet34_GN,
     convnextv2_fcmae,
     get_resnet34_imagenet100,
-    get_vgg13_by_class_num,
+    get_vgg11_by_class_num,
+    get_vgg11_by_sample_num,
     get_vgg13_imagenet100,
     mae,
 )
@@ -136,16 +139,27 @@ def get_args():
 def get_model(model_name: str, dataset: str, pretrained: bool = True, weights_path: str = None):
     if "cifar" in dataset:
         return get_cifar_model(model_name, pretrained, weights_path)
+    elif "samples" in model_name:
+        if "1000" in model_name:
+            sample_per_class = 1000
+        elif "100" in model_name:
+            sample_per_class = 100
+        elif "200" in model_name:
+            sample_per_class = 200
+        elif "500" in model_name:
+            sample_per_class = 500
+        return get_vgg11_by_sample_num(sample_per_class, pretrained)
+
     elif "class" in model_name:
-        if "10" in model_name:
+        if "1000" in model_name:
+            class_num = 1000
+        elif "100" in model_name:
+            class_num = 100
+        elif "10" in model_name:
             class_num = 10
         elif "50" in model_name:
             class_num = 50
-        elif "100" in model_name:
-            class_num = 100
-        elif "1000" in model_name:
-            class_num = 1000
-        return get_vgg13_by_class_num(class_num=class_num, pretrained=True)
+        return get_vgg11_by_class_num(class_num=class_num, pretrained=True)
     elif "vgg13_imagenet100" in model_name:
         print("loading vgg imagenet100 model")
         return get_vgg13_imagenet100(model_name, pretrained)
@@ -213,10 +227,12 @@ def get_imagenet_model(model_name: str, pretrained=True):
     elif "convnext" in model_name.lower():
         if pretrained:
             print("loading imagenet1k pretrained convnext model")
-            return convnext_base(weights=ConvNeXt_Base_Weights.IMAGENET1K_V1)
+            model_name = "convnext_base.fb_in1k"
+            model = timm.create_model(model_name, pretrained=True)
+            return model
         else:
-            print("loading random init convnext model")
-            return convnext_base()
+            model = timm.create_model(model_name, pretrained=False)
+            return model
     elif "vit" in model_name.lower():
         model_name = "vit_base_patch16_224.augreg_in1k"
         model = timm.create_model(model_name, pretrained=True)
@@ -372,6 +388,45 @@ class EarlyStopper:
 #     return normalized_within_class_var.item(), normalized_between_class_var.item(), nc1.item()
 
 
+def average_pairwise_cosine_distance(X):
+    print(f"X shape: {X.size()}")
+    if len(X.shape) == 4:
+        # if swin transformer, match the shape of (N, C, H, W)
+        if X.shape[1] == X.shape[2]:
+            X = X.permute(0, 3, 1, 2)
+
+        N, C, H, W = X.shape
+    elif len(X.shape) == 3:
+        # remove positional embedding
+        X = X[:, 1:]
+        N, C, H = X.shape
+        W = 1
+    epsilon = 1e-10
+
+    # Reshape and normalize
+    # N X C X (H * W)
+    X_reshaped = X.reshape(N, C, -1)
+
+    norms = np.linalg.norm(X_reshaped, axis=2, keepdims=True) + epsilon
+    X_normalized = X_reshaped / norms  # Normalize each channel
+
+    total_distance = 0.0
+
+    for n in range(N):
+        # Compute cosine similarity matrix for each feature map
+        cosine_similarity = np.dot(X_normalized[n], X_normalized[n].T)
+        # Convert cosine similarity to cosine distance
+        cosine_distance = 1 - cosine_similarity
+
+        # Sum only the upper triangular part, excluding the diagonal
+        # skip dividing by 2, since summing upper triangular part do same thing.
+        total_distance += np.sum(np.triu(cosine_distance, k=1))
+
+    # Calculate the average distance
+    average_distance = total_distance / (N * C * C)
+    return average_distance
+
+
 def computeNC1(labels, embeddings):
     unique_classes, class_counts = labels.unique(return_counts=True)
     mu_c = torch.stack([embeddings[:, labels == c].mean(dim=1) for c in unique_classes])
@@ -388,15 +443,51 @@ def computeNC1(labels, embeddings):
 
     normalized_within_class_var = within_class_var / embeddings.shape[1]
 
-    # between_class_var = ((mu_c - mu_G) ** 2).sum() * class_counts
-    # normalized_between_class_var = between_class_var.sum() / (unique_classes.size(0) - 1)
-
     between_class_var = ((mu_c - mu_G) ** 2).sum(dim=1) * class_counts
     normalized_between_class_var = between_class_var.sum() / embeddings.shape[1]
 
     nc1 = normalized_within_class_var / normalized_between_class_var
 
     return normalized_within_class_var.item(), normalized_between_class_var.item(), nc1.item()
+
+
+def stable_rank(A, maxIter=1000):
+    # shape of A : (D, N)
+    # Ensure the matrix A is in single precision
+    A = A.float()
+
+    # Compute the sum of squares of each row in A
+    B = torch.sum(A * A, dim=1)
+
+    # Power iteration to approximate the largest singular value
+    s = power_iter(A, maxIter)
+
+    F_norm_squared = torch.sum(B)
+
+    # Calculate the stable rank using the Frobenius norm squared and the approximated spectral norm squared
+    r = F_norm_squared / s
+    return r
+
+
+def power_iter(A, maxIter, tol=1e-4):
+    # Random initialization of x, ensuring single precision
+    x = torch.randn((A.shape[1],), dtype=torch.float32, device=A.device)
+
+    for j in range(maxIter):
+        # Matrix-vector multiplication
+        v = A.T @ (A @ x)
+
+        # Normalizing the vector v
+        x_new = v / torch.norm(v)
+
+        # Check for convergence
+        if torch.norm(x_new - x) < tol:
+            break
+
+        x = x_new
+
+    # Return the spectral norm approximation
+    return torch.norm(v) / torch.norm(x)
 
 
 # Example usage:
