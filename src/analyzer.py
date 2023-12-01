@@ -15,13 +15,14 @@ from torchvision.models.vision_transformer import EncoderBlock
 from tqdm import tqdm
 
 from models.models import IterativeKNN
-from prac import average_pairwise_cosine_distance
 from utils.utils import (
+    average_pairwise_cosine_distance,
     compute_X_reduced,
     computeNC1,
     get_size,
     mean_center,
     random_projection_method,
+    stable_rank,
     vectorize_global_avg_pooling,
     vectorize_global_max_pooling,
 )
@@ -123,8 +124,8 @@ class Analyzer(metaclass=ABCMeta):
         print(f"resolution: {resolution}")
         print(f"data name: {self.data_name}")
         if resolution == 224:
-            #     patch_size = 6
-            # elif resolution == 128:
+            patch_size = 6
+        elif resolution == 128:
             patch_size = 4
         else:
             patch_size = 2
@@ -169,12 +170,18 @@ class Analyzer(metaclass=ABCMeta):
         )
         self.feature_num += 1
 
+    def hook_compute_stable_rank(self, module, input, ouput):
+        output = self.preprocess_output(ouput).T
+        print(f"output shape: {output.size()}")
+        rank = stable_rank(output)
+        print(rank)
+        self.stable_ranks.append(rank)
+
     # singular values
     def hook_compute_singular_values(self, module, input, output):
         output = self.preprocess_output(output).T
         if output.size(1) == 1:
             return
-        output = output.to(torch.float16)
         print(f"output shape: {output.size()} {output.dtype}")
         d = output.size(0)
         N = output.size(1)
@@ -390,6 +397,24 @@ class Analyzer(metaclass=ABCMeta):
         input = input.to(self.main_device)
         output = self.model(input)
         return output
+
+    def download_stable_rank(self, input_data, specific_data_name):
+        self.model.to(self.main_device)
+        self.stable_ranks = []
+
+        self.register_hooks(self.hook_compute_stable_rank)
+        base_path = f"values/{self.data_name}/stable_rank"
+        singular_save_path = f"{base_path}/{specific_data_name}"
+
+        self.check_folder(singular_save_path)
+        self.forward(input_data)
+
+        # check is the folder exist
+        torch.save(
+            self.stable_ranks,
+            f"{singular_save_path}/{self.name}.pt",
+        )
+        self.remove_hooks()
 
     def download_singular_values(self, input_data, specific_data_name, GAP=False, pretrained=True):
         self.model.to(self.main_device)
@@ -650,19 +675,11 @@ class ConvNextAnalyzer(Analyzer):
     def __init__(self, model, model_name, data_name):
         super().__init__(model, model_name, data_name)
 
-    def extract_conv2d_from_cnblock(self, model, conv2d_layers):
-        for name, module in model.named_children():
-            if name.startswith("block"):
-                for child_name, child_module in module.named_children():
-                    if isinstance(child_module, nn.Conv2d):
-                        conv2d_layers.append(child_module)
-            else:
-                # Recurse into other child modules
-                self.extract_conv2d_from_cnblock(module, conv2d_layers)
-
     def get_layers(self):
         layers = []
-        self.extract_conv2d_from_cnblock(self.model, layers)
+        for name, module in self.model.named_modules():
+            if "conv" in name and isinstance(module, nn.Conv2d):
+                layers.append(module)
         print(f"new layer count {len(layers)}")
         return layers
 
