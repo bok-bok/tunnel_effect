@@ -27,8 +27,6 @@ DIR_DICT = {
 
 def get_data_loader(
     dataset_name,
-    train_samples_per_class,
-    test_samples_per_class,
     class_num,
     batch_size=512,
     resolution=224,
@@ -414,7 +412,9 @@ def get_balanced_indices(dataset, dataset_name, dataset_type, samples_per_class=
     return indices
 
 
-def get_balanced_imagenet_input_data(sample_size=15000, resolution=224,num_classes = 1000, use_previous=True):
+def get_balanced_imagenet_input_data(
+    sample_size=15000, resolution=224, num_classes=1000, use_previous=True
+):
     val_dir = os.path.join(IMAGENET_DIR, "val")
     train_dir = os.path.join(IMAGENET_DIR, "train")
     train_transform, test_transform = get_imagenet_transforms(resolution_size=resolution)
