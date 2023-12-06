@@ -27,9 +27,6 @@ from utils.utils import (
     vectorize_global_max_pooling,
 )
 
-sys.path.append("models/CLIP/clip")
-from models.CLIP.clip import CLIP, ResidualAttentionBlock
-
 
 def random_projection_method(X, b, device):
     X_reduced = compute_X_reduced(X, b).to(device)
@@ -722,7 +719,7 @@ class SwinAnalyzer(Analyzer):
         return output
 
 
-class MAEAnalyzer(Analyzer):
+class VITAnalyzer(Analyzer):
     def __init__(self, model, model_name, data_name):
         super().__init__(model, model_name, data_name)
 
@@ -737,24 +734,6 @@ class MAEAnalyzer(Analyzer):
     def preprocess_output(self, output):
         output = output[:, 1:]
         output = output.view(output.size(0), -1)
-        return output
-
-
-class VITAnalyzer(Analyzer):
-    def __init__(self, model, model_name, data_name):
-        super().__init__(model, model_name, data_name)
-
-    def get_layers(self):
-        layers = []
-        for name, module in self.model.named_modules():
-            if isinstance(module, EncoderBlock):
-                layers.append(module)
-        print(len(layers))
-        return layers
-
-    def preprocess_output(self, output):
-        output = output[:, 1:]
-        output = output.reshape(output.size(0), -1)
         return output
 
 
@@ -776,24 +755,6 @@ class DINOV2Analyzer(Analyzer):
         return output
 
 
-class CLIPAnalyzer(Analyzer):
-    def __init__(self, model, model_name, data_name):
-        super().__init__(model, model_name, data_name)
-
-    def get_layers(self):
-        layers = []
-        for name, module in self.model.named_modules():
-            if isinstance(module, ResidualAttentionBlock):
-                if "visual" in name:
-                    layers.append(module)
-        return layers
-
-    def preprocess_output(self, output):
-        print(output.size())
-        output = output.view(output.size(0), -1)
-        return output
-
-
 def get_analyzer(model, model_name: str, dummy_input):
     if "mlp" in model_name:
         return MLPAnalyzer(model, model_name, dummy_input)
@@ -806,11 +767,11 @@ def get_analyzer(model, model_name: str, dummy_input):
         return ConvNextV2Analyzer(model, model_name, dummy_input)
 
     elif "vit" in model_name.lower():
-        return MAEAnalyzer(model, model_name, dummy_input)
+        return VITAnalyzer(model, model_name, dummy_input)
     elif "mugs" in model_name.lower():
-        return MAEAnalyzer(model, model_name, dummy_input)
+        return VITAnalyzer(model, model_name, dummy_input)
     elif "mae" in model_name.lower():
-        return MAEAnalyzer(model, model_name, dummy_input)
+        return VITAnalyzer(model, model_name, dummy_input)
     elif "convnext" in model_name.lower():
         return ConvNextAnalyzer(model, model_name, dummy_input)
     elif "swin" in model_name.lower():
@@ -819,10 +780,7 @@ def get_analyzer(model, model_name: str, dummy_input):
     elif "dinov2" in model_name.lower():
         print(f"loading {model_name} analyzer")
         return DINOV2Analyzer(model, model_name, dummy_input)
-    elif "clip" in model_name.lower():
-        print(f"loading {model_name} analyzer")
-        return CLIPAnalyzer(model, model_name, dummy_input)
     elif "dino" in model_name.lower():
-        return MAEAnalyzer(model, model_name, dummy_input)
+        return VITAnalyzer(model, model_name, dummy_input)
     else:
         raise ValueError("model name not supported")
