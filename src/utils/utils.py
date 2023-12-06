@@ -32,17 +32,13 @@ from models.models import (
     ResNet34,
     ResNet34_GN,
     convnextv2_fcmae,
-    get_resnet34_imagenet100,
     get_vgg11_by_class_num,
     get_vgg11_by_sample_num,
     get_vgg13_imagenet100,
-    mae,
 )
 
 sys.path.append("models/CLIP")
 sys.path.append("models/CLIP/clip")
-from models.CLIP import clip
-from models.CLIP.clip import CLIP, ResidualAttentionBlock
 
 
 def mean_center(X):

@@ -21,9 +21,7 @@ sys.path.append("models/mae")
 sys.path.append("models/CLIP")
 sys.path.append("models/CLIP/clip")
 
-from models.CLIP import clip
 from models.CLIP.clip import ResidualAttentionBlock
-from models.mae import models_mae, models_vit
 from models.mae.util.pos_embed import interpolate_pos_embed
 
 
@@ -442,33 +440,6 @@ def convnextv2_base(**kwargs):
     return model
 
 
-def mae(pretrained=True):
-    model_name = "vit_base_patch16"
-    model = models_vit.__dict__[model_name](num_classes=1000, global_pool=False)
-    if pretrained:
-        print("loading mae pre-trained model")
-        checkpoint = torch.load("weights/mae_pretrain_vit_base.pth")
-
-        checkpoint_model = checkpoint["model"]
-        state_dict = model.state_dict()
-        for k in ["head.weight", "head.bias"]:
-            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint_model[k]
-
-        interpolate_pos_embed(model, checkpoint_model)
-
-        # load pre-trained model
-        msg = model.load_state_dict(checkpoint_model, strict=False)
-        print(msg)
-    return model
-
-
-def get_clip(pretrained=True):
-    if pretrained:
-        model, preprocess = clip.load("ViT-B/32", device="cuda")
-
-
 image100_pretrained_weights = {
     32: "0.01_0.0/32_20_41.74.pth",
     # 32: "0.01_0.0/32_31_45.98.pth",
@@ -480,34 +451,6 @@ image100_pretrained_weights = {
     # "down_up" : "0.005_0.001/224_31_58.7.pth"
     "down_up": "0.005_0.01/224_20_55.6.pth",
 }
-
-
-def get_resnet34_imagenet100(resolution_size, pretrained=True):
-    model = resnet34(weights=None)
-    if resolution_size in [32, 64]:
-        print(f"loading resnet34 imagenet100 {resolution_size}")
-        model.conv1 = nn.Conv2d(
-            3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
-        )
-        model.maxpool = nn.Identity()
-    elif resolution_size == 128:
-        print(f"loading resnet34 imagenet100 {resolution_size}")
-        model.conv1 = nn.Conv2d(
-            3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
-        )
-    else:
-        print(f"loading resnet34 imagenet100 {resolution_size}")
-        pass
-    model.fc = nn.Linear(512, 100)
-    nn.init.xavier_uniform_(model.fc.weight)
-    if pretrained:
-        print(f"loading resnet34 imagenet100 {resolution_size} pretrained")
-        file_name = image100_pretrained_weights[resolution_size]
-        model.load_state_dict(
-            torch.load(f"weights/resnet34_imagenet100/{resolution_size}/{file_name}.pth")
-        )
-
-    return model
 
 
 def get_vgg13_imagenet100(model_name, pretrained=True):
@@ -557,6 +500,29 @@ def initialize_weights(m):
 #     500: "0.001/0.0/500.pth",  # 7
 #     1000: "0.001/0.0/1000.pth",  # 6
 # }
+
+
+def get_resnet34_by_resolution(image_resolution, class_num=100, pretrained=True):
+    if image_resolution not in [32, 64, 128, 224]:
+        raise ValueError(f" {image_resolution} image resolution not found")
+
+    print(f"loading resnet34 {image_resolution}")
+    model = resnet34(weights=None)
+
+    # modify layers to fit image resolution
+    if image_resolution in [32, 64]:
+        model.conv1 = nn.Conv2d(
+            3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
+        )
+
+        if image_resolution == 32:
+            model.maxpool = nn.Identity()
+
+    # change last layer
+    model.fc = nn.Linear(512, class_num)
+
+    return model
+
 
 VGG11_pretrained_weights_by_sample_size = {
     100: "0.001/0.0001/100_20_18.44.pth",
