@@ -6,7 +6,6 @@ from abc import ABCMeta, abstractmethod
 
 import numpy as np
 import torch
-from flowtorch.analysis import SVD
 from sklearn.metrics.pairwise import euclidean_distances
 from timm.models.vision_transformer import Block
 from torch import nn, optim
