@@ -32,6 +32,7 @@ from models.models import (
     ResNet34,
     ResNet34_GN,
     convnextv2_fcmae,
+    get_resnet34_by_resolution,
     get_vgg11_by_class_num,
     get_vgg11_by_sample_num,
     get_vgg13_imagenet100,
@@ -144,7 +145,9 @@ def get_model(model_name: str, dataset: str, pretrained: bool = True, weights_pa
             sample_per_class = 200
         elif "500" in model_name:
             sample_per_class = 500
-        return get_vgg11_by_sample_num(sample_per_class, pretrained)
+
+        if "vgg11" in model_name:
+            return get_vgg11_by_sample_num(sample_per_class, pretrained)
 
     elif "class" in model_name:
         if "1000" in model_name:
@@ -159,8 +162,26 @@ def get_model(model_name: str, dataset: str, pretrained: bool = True, weights_pa
     elif "vgg13_imagenet100" in model_name:
         print("loading vgg imagenet100 model")
         return get_vgg13_imagenet100(model_name, pretrained)
+    elif "resnet34_imagenet100" in model_name:
+        resolution = get_resolution_from_model_name(model_name)
+        return get_resnet34_by_resolution(resolution, class_num=class_num, pretrained=pretrained)
+
     else:
         return get_imagenet_model(model_name, pretrained)
+
+
+def get_resolution_from_model_name(model_name: str):
+    if "32" in model_name:
+        resolution = 32
+    elif "64" in model_name:
+        resolution = 64
+    elif "128" in model_name:
+        resolution = 128
+    elif "224" in model_name:
+        resolution = 224
+    else:
+        raise ValueError("resolution not found")
+    return resolution
 
 
 def get_imagenet_model(model_name: str, pretrained=True):
