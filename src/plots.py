@@ -57,9 +57,7 @@ def plot_error_dimension(model_name, dim, original=False, download=False):
     # plot original method error
     if original:
         original_errors: dict = torch.load(f"values/errors/{model_name}/original_{dim}.pt")
-        plt.plot(
-            list(original_errors.keys()), list(original_errors.values()), label="Original Method"
-        )
+        plt.plot(list(original_errors.keys()), list(original_errors.values()), label="Original Method")
     # plot projection method error
     plt.plot(list(errors_mean.keys()), list(errors_mean.values()), label="Projection Method")
 
@@ -110,7 +108,7 @@ def spearman_test(data_name, id, ood, ood_2, model_name):
     return result
 
 
-def get_mean_std(data_name, specific_name, model_name):
+def get_mean_std(data_name, specific_name, model_name, normalized=False):
     # set OOD or ID
     OOD = False if data_name == specific_name else True
 
@@ -120,9 +118,19 @@ def get_mean_std(data_name, specific_name, model_name):
     values = [torch.load(f"{directory}/{file}") for file in files]
     means = []
     stds = []
+    new_values = []
+    if normalized:
+        for arg in values:
+            new_args = []
+            for val in arg:
+                new_args.append(val / max(arg))
+            new_values.append(new_args)
+        # values = [val / max(arg) for val in arg for arg in values]
+    else:
+        new_values = values
     for i in range(len(values[0])):
-        mean = np.mean([arg[i] for arg in values])
-        std = np.std([arg[i] for arg in values])
+        mean = np.mean([arg[i] for arg in new_values])
+        std = np.std([arg[i] for arg in new_values])
         means.append(mean)
         stds.append(std)
     means = np.array(means)
@@ -149,13 +157,33 @@ model_name_convert = {
     "resnet34_imagenet100_64": "ResNet34 - Resolution 64",
     "resnet34_imagenet100_128": "ResNet34 - Resolution 128",
     "resnet34_imagenet100_224": "ResNet34 - Resolution 224",
-    "vgg13_imagenet100_32": "VGG13_32",
-    "vgg13_imagenet100_64": "VGG13_64",
-    "vgg13_imagenet100_128": "VGG13_128",
-    "vgg13_imagenet100_224": "VGG13_224",
-    "vgg13_imagenet_class_10": "VGG13 - 10 Classes",
-    "vgg13_imagenet_class_50": "VGG13 - 50 Classes",
-    "vgg13_imagenet_class_100": "VGG13 - 100 Classes",
+    "resnet34_imagenet100_224_wide": "ResNet34 - Resolution 224 - Wide",
+    "resnet18_imagenet100_32": "ResNet18 - Resolution 32",
+    "resnet18_imagenet100_64": "ResNet18 - Resolution 64",
+    "resnet18_imagenet100_128": "ResNet18 - Resolution 128",
+    "resnet18_imagenet100_224": "ResNet18 - Resolution 224",
+    "resnet18_imagenet100_aug_32": "ResNet18(Augmentation) - Resolution 32",
+    "resnet18_imagenet100_aug_64": "ResNet18(Augmentation) - Resolution 64",
+    "resnet18_imagenet100_aug_128": "ResNet18(Augmentation) - Resolution 128",
+    "resnet18_imagenet100_aug_224": "ResNet18(Augmentation) - Resolution 224",
+    "resnet34_original_60": "ResNet34 - Original - 60 Epochs",
+    "resnet34_original_90": "ResNet34 - Original - 90 Epochs",
+    "resnet34_original_120": "ResNet34 - Original - 120 Epochs",
+    "resnet34_original_150": "ResNet34 - Original - 150 Epochs",
+    "resnet34_original_final": "ResNet34 - Original - Final",
+    "vgg11_imagenet100_32": "VGG11_32",
+    "vgg11_imagenet100_64": "VGG11_64",
+    "vgg11_imagenet100_128": "VGG11_128",
+    "vgg11_imagenet100_224": "VGG11_224",
+    "vgg11_imagenet_class_10": "VGG11 - 10 Classes",
+    "vgg11_imagenet_class_50": "VGG11 - 50 Classes",
+    "vgg11_imagenet_class_100": "VGG11 - 100 Classes",
+    "resnet18_imagenet100_no_residual_32": "ResNet18 - No Residual - 32",
+    "resnet18_imagenet100_no_residual_64": "ResNet18 - No Residual - 64",
+    "resnet18_imagenet100_no_residual_128": "ResNet18 - No Residual - 128",
+    "resnet18_cifar10": "ResNet18 ",
+    "avit_tiny_patch8_imagenet100_224": "AViT-Tiny - 224",
+    "vit_tiny_patch8_imagenet100_64": "ViT-Tiny - 64",
 }
 
 
@@ -179,15 +207,9 @@ def plot_resolution_ranks():
 
     plt.figure(figsize=(10, 8))
 
-    plt.plot(
-        range(1, len(rank_32) + 1), rank_32, label=r"Resolution $32 \times 32$", color="#377EB8"
-    )
-    plt.plot(
-        range(1, len(rank_32) + 1), rank_64, label=r"Resolution $64 \times 64$", color="#FF7F00"
-    )
-    plt.plot(
-        range(1, len(rank_32) + 1), rank_128, label=r"Resolution $128 \times 128$", color="#4DAF4A"
-    )
+    plt.plot(range(1, len(rank_32) + 1), rank_32, label=r"Resolution $32 \times 32$", color="#377EB8")
+    plt.plot(range(1, len(rank_32) + 1), rank_64, label=r"Resolution $64 \times 64$", color="#FF7F00")
+    plt.plot(range(1, len(rank_32) + 1), rank_128, label=r"Resolution $128 \times 128$", color="#4DAF4A")
     plt.xticks(range(1, len(rank_32) + 1), labels=[str(x) for x in range(1, len(rank_32) + 1)])
     plt.xlim(left=1, right=len(rank_32))
 
@@ -281,6 +303,26 @@ def plot_NC1_all():
     # ssl
 
 
+def plot_NC2_all():
+    # supervised models
+    plt.figure(figsize=(10, 8))
+    models = ["resnet50", "convnext", "dino", "vit", "mae", "mugs", "resnet50_swav"]
+    # models = ["convnext"]
+
+    for model in models:
+        n2 = torch.load(f"values/imagenet/NC2/{model}.pt")
+        normalized_layers = np.linspace(0, 1, len(n2))
+
+        # Create an interpolation function
+        interp_func = interp1d(normalized_layers, n2, kind="linear")
+
+        # Interpolate at regular intervals
+        interp_points = np.linspace(0, 1, 100)  # Change 100 to the desired resolution
+        plt.plot(interp_points, interp_func(interp_points), label=model_name_convert[model])
+    set_plot(plt, n2, xlabel="Relative Layer Depth", ylabel="Feature Cosine Distance", normalize=True)
+    plt.savefig("NC2_all_norm.png", dpi=300)
+
+
 def plot_NC4_resolution():
     nc4_32 = torch.load("values/imagenet100/NC4/vgg13_imagenet100_32.pt")
     nc4_64 = torch.load("values/imagenet100/NC4/vgg13_imagenet100_64.pt")
@@ -295,12 +337,8 @@ def plot_NC4_resolution():
     plt.figure(figsize=(10, 8))
     plt.plot(range(1, len(nc4_32) + 1), nc4_32, label=r"Resolution $32 \times 32$", color="#377EB8")
     plt.plot(range(1, len(nc4_32) + 1), nc4_64, label=r"Resolution $64 \times 64$", color="#FF7F00")
-    plt.plot(
-        range(1, len(nc4_32) + 1), nc4_128, label=r"Resolution $128 \times 128$", color="#4DAF4A"
-    )
-    plt.plot(
-        range(1, len(nc4_32) + 1), nc4_224, label=r"Resolution $224 \times 224$", color="#984EA3"
-    )
+    plt.plot(range(1, len(nc4_32) + 1), nc4_128, label=r"Resolution $128 \times 128$", color="#4DAF4A")
+    plt.plot(range(1, len(nc4_32) + 1), nc4_224, label=r"Resolution $224 \times 224$", color="#984EA3")
 
     plt.xticks(range(1, len(nc4_32) + 1), labels=[str(x) for x in range(1, len(nc4_32) + 1)])
     plt.ylabel("Prediction Agreement [%]", size=F, fontweight="bold")
@@ -396,18 +434,10 @@ def plot_NC1_resolution():
     nc_1_128 = torch.load("values/imagenet100/NC1/vgg13_imagenet100_128.pt")
     nc_1_224 = torch.load("values/imagenet100/NC1/vgg13_imagenet100_224.pt")
 
-    plt.plot(
-        range(1, len(nc_1_224) + 1), nc_1_32, label=r"Resolution $32 \times 32$", color="#377EB8"
-    )
-    plt.plot(
-        range(1, len(nc_1_224) + 1), nc_1_64, label=r"Resolution $64 \times 64$", color="#FF7F00"
-    )
-    plt.plot(
-        range(1, len(nc_1_224) + 1), nc_1_128, label=r"Resolution $128 \times 128$", color="#4DAF4A"
-    )
-    plt.plot(
-        range(1, len(nc_1_224) + 1), nc_1_224, label=r"Resolution $224 \times 224$", color="#984EA3"
-    )
+    plt.plot(range(1, len(nc_1_224) + 1), nc_1_32, label=r"Resolution $32 \times 32$", color="#377EB8")
+    plt.plot(range(1, len(nc_1_224) + 1), nc_1_64, label=r"Resolution $64 \times 64$", color="#FF7F00")
+    plt.plot(range(1, len(nc_1_224) + 1), nc_1_128, label=r"Resolution $128 \times 128$", color="#4DAF4A")
+    plt.plot(range(1, len(nc_1_224) + 1), nc_1_224, label=r"Resolution $224 \times 224$", color="#984EA3")
 
     set_plot(plt, nc_1_224, xlabel="Layer", ylabel="NC1")
 
@@ -558,6 +588,50 @@ def plot_resolution_NC2():
     plt.savefig("NC2_resolution.png", dpi=300)
 
 
+def plot_ranks_vgg11_different_sample_size():
+    rank_100 = get_rankme_ranks(
+        torch.load(f"values/imagenet/singular_values/imagenet/vgg13_imagenet_class_100.pt")
+    )
+    rank_200 = get_rankme_ranks(
+        torch.load(f"values/imagenet/singular_values/imagenet/vgg11_imagenet_samples_200.pt")
+    )
+    rank_500 = get_rankme_ranks(
+        torch.load(f"values/imagenet/singular_values/imagenet/vgg11_imagenet_samples_500.pt")
+    )
+    rank_1000 = get_rankme_ranks(
+        torch.load(f"values/imagenet/singular_values/imagenet/vgg11_imagenet_samples_1000.pt")
+    )
+
+    plt.figure(figsize=(10, 8))
+    plt.plot(
+        range(1, len(rank_100) + 1),
+        rank_100,
+        label="100 samples per class",
+        color="#377EB8",
+    )
+    plt.plot(
+        range(1, len(rank_100) + 1),
+        rank_200,
+        label="200 samples per class",
+        color="#FF7F00",
+    )
+    plt.plot(
+        range(1, len(rank_100) + 1),
+        rank_500,
+        label="500 samples per class",
+        color="#4DAF4A",
+    )
+    plt.plot(
+        range(1, len(rank_100) + 1),
+        rank_1000,
+        label="1000 samples per class",
+        color="#984EA3",
+    )
+
+    set_plot(plt, rank_100, xlabel="Layer", ylabel="Effective Rank")
+    plt.savefig("vgg11_rank_different_samples.png", dpi=300)
+
+
 def set_plot(plt, input_data, xlabel, ylabel, normalize=False):
     if not normalize:
         if len(input_data) > 40:
@@ -618,13 +692,9 @@ def plot_first_figure():
             labels=[str(x) for x in range(1, len(ood_means) + 1, 2)],
         )
     else:
-        plt.xticks(
-            range(1, len(ood_means) + 1), labels=[str(x) for x in range(1, len(ood_means) + 1)]
-        )
+        plt.xticks(range(1, len(ood_means) + 1), labels=[str(x) for x in range(1, len(ood_means) + 1)])
     # plot ID
-    ax1.plot(
-        range(1, len(id_means) + 1), id_means, label=f"ID ({ID_data_name} - 32x32)", color=ID_COLOR
-    )
+    ax1.plot(range(1, len(id_means) + 1), id_means, label=f"ID ({ID_data_name} - 32x32)", color=ID_COLOR)
     ax1.fill_between(
         range(1, len(id_means) + 1),
         id_means - id_stds,
@@ -736,9 +806,7 @@ def plot_change_ranks(model_name, pretrained_data):
     id_path = f"values/{pretrained_data}/singular_values/{pretrained_data}/{model_name}.pt"
 
     arch_name = model_name.split("_")[0]
-    random_path = (
-        f"values/{pretrained_data}/singular_values/{pretrained_data}/{arch_name}_random_init.pt"
-    )
+    random_path = f"values/{pretrained_data}/singular_values/{pretrained_data}/{arch_name}_random_init.pt"
 
     id_sigs = torch.load(id_path)
 
@@ -759,9 +827,7 @@ def plot_change_ranks(model_name, pretrained_data):
 
 def plot_random_ranks(model_name, pretrained_data):
     arch_name = model_name.split("_")[0]
-    random_path = (
-        f"values/{pretrained_data}/singular_values/{pretrained_data}/{arch_name}_random_init.pt"
-    )
+    random_path = f"values/{pretrained_data}/singular_values/{pretrained_data}/{arch_name}_random_init.pt"
 
     random_sigs = torch.load(random_path)
 
@@ -820,6 +886,168 @@ def plot_NC(model_name, pretrained_data, nc_type):
     plt.savefig(f"{base_dir}/{model_name}.png", dpi=300)
 
 
+def plot_compare_aug(model_name: str):
+    ID_data_name = "imagenet100"
+    OOD_data_name = "places"
+    OOD_data_name2 = "ninco"
+    save_dir = f"plots/{ID_data_name}/acc_rank"
+    two_ood = False
+    if OOD_data_name2 is not None:
+        two_ood = True
+
+    aug_model_name = f"resnet18_imagenet100_aug_{model_name.split('_')[-1]}"
+
+    ood_means, ood_stds = get_mean_std(ID_data_name, OOD_data_name, model_name)
+    if two_ood:
+        ood_means_2, ood_stds_2 = get_mean_std(ID_data_name, OOD_data_name2, model_name)
+
+    id_means, id_stds = get_mean_std(ID_data_name, ID_data_name, model_name)
+
+    aug_ood_means, aug_ood_stds = get_mean_std(ID_data_name, OOD_data_name, aug_model_name)
+    if two_ood:
+        aug_ood_means_2, aug_ood_stds_2 = get_mean_std(ID_data_name, OOD_data_name2, aug_model_name)
+    aug_id_means, aug_id_stds = get_mean_std(ID_data_name, ID_data_name, aug_model_name)
+
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    # label font size
+    if len(ood_means) > 40:
+        plt.xticks(
+            range(1, len(ood_means) + 1, 3),
+            labels=[str(x) for x in range(1, len(ood_means) + 1, 3)],
+        )
+    elif len(ood_means) > 20:
+        plt.xticks(
+            range(1, len(ood_means) + 1, 2),
+            labels=[str(x) for x in range(1, len(ood_means) + 1, 2)],
+        )
+    else:
+        plt.xticks(range(1, len(ood_means) + 1), labels=[str(x) for x in range(1, len(ood_means) + 1)])
+
+    ID_data_name = data_name_convert[ID_data_name]
+    OOD_data_name = data_name_convert[OOD_data_name]
+    if two_ood:
+        OOD_data_name2 = data_name_convert[OOD_data_name2]
+
+    # plot ID
+    ax1.plot(range(1, len(id_means) + 1), id_means, label=f"ID ({ID_data_name})", color=ID_COLOR)
+    ax1.fill_between(
+        range(1, len(id_means) + 1),
+        id_means - id_stds,
+        id_means + id_stds,
+        alpha=0.2,
+        color=ID_COLOR,
+    )
+
+    ax1.plot(
+        range(1, len(aug_id_means) + 1),
+        aug_id_means,
+        label=f"ID ({ID_data_name} - Aug)",
+        color=ID_COLOR,
+        linestyle="dotted",
+    )
+    ax1.fill_between(
+        range(1, len(aug_id_means) + 1),
+        aug_id_means - aug_id_stds,
+        aug_id_means + aug_id_stds,
+        alpha=0.2,
+        color=ID_COLOR,
+    )
+
+    # plot OOD1
+    ax1.plot(range(1, len(ood_means) + 1), ood_means, label=f"OOD ({OOD_data_name})", color=OOD_COLOR)
+    ax1.fill_between(
+        range(1, len(ood_means) + 1),
+        ood_means - ood_stds,
+        ood_means + ood_stds,
+        alpha=0.2,
+        color=OOD_COLOR,
+    )
+
+    ax1.plot(
+        range(1, len(aug_ood_means) + 1),
+        aug_ood_means,
+        label=f"OOD ({OOD_data_name} - Aug)",
+        color=OOD_COLOR,
+        linestyle="dotted",
+    )
+    ax1.fill_between(
+        range(1, len(aug_ood_means) + 1),
+        aug_ood_means - aug_ood_stds,
+        aug_ood_means + aug_ood_stds,
+        alpha=0.2,
+        color=OOD_COLOR,
+    )
+
+    # plot OOD2
+    if two_ood:
+        ax1.plot(
+            range(1, len(ood_means_2) + 1),
+            ood_means_2,
+            label=f"OOD ({OOD_data_name2})",
+            color=OOD_2_COLOR,
+        )
+        ax1.fill_between(
+            range(1, len(ood_means_2) + 1),
+            ood_means_2 - ood_stds_2,
+            ood_means_2 + ood_stds_2,
+            alpha=0.2,
+            color=OOD_2_COLOR,
+        )
+
+        ax1.plot(
+            range(1, len(aug_ood_means_2) + 1),
+            aug_ood_means_2,
+            label=f"OOD ({OOD_data_name2} - Aug)",
+            color=OOD_2_COLOR,
+            linestyle="dotted",
+        )
+        ax1.fill_between(
+            range(1, len(aug_ood_means_2) + 1),
+            aug_ood_means_2 - aug_ood_stds_2,
+            aug_ood_means_2 + aug_ood_stds_2,
+            alpha=0.2,
+            color=OOD_2_COLOR,
+        )
+
+    # Add best accuracy to y-ticks
+    # yticks = list(plt.yticks()[0])
+    # yticks.append(max(id_means))
+    # yticks = sorted(yticks)
+    # for i in range(len(yticks) - 1):
+    #     if abs(yticks[i] - yticks[i + 1]) < 2:
+    #         yticks[i] = 0
+
+    # plt.yticks(list(plt.yticks()[0]) + [max(id_means)])
+    # plt.yticks(list(plt.yticks()[0]) + [max(id_means)])
+    plt.grid()
+
+    ax1.set_ylabel("Top-1 Accuracy [%]", size=F, fontweight="bold")
+    plt.xlabel(f"Layer", size=F, fontweight="bold")
+
+    plt.legend(loc="upper left", frameon=True, framealpha=0.6)
+    plt.xlim(left=1, right=len(ood_means))
+
+    ax1.set_ylim(bottom=0)
+    plt.tick_params(axis="both", which="major", labelsize=F)
+    plt.tick_params(axis="both", which="minor", labelsize=F)
+
+    if two_ood:
+        all_acc = np.concatenate((id_means, ood_means, ood_means_2))
+    else:
+        all_acc = np.concatenate((id_means, ood_means))
+    plt.yticks(np.arange(10, max(all_acc), 10))
+
+    if not os.path.exists(os.path.dirname(save_dir)):
+        os.makedirs(os.path.dirname(save_dir))
+    add_title = True
+    normalize = False
+
+    file_name = f"{model_name}_aug_compare.png"
+    if add_title:
+        plt.title(f"{model_name_convert[model_name]} - {ID_data_name}")
+    plt.savefig(f"{save_dir}/{file_name}", dpi=300)
+
+
 def plot_acc(
     ID_data_name,
     OOD_data_name,
@@ -831,16 +1059,18 @@ def plot_acc(
     normalize=False,
 ):
     save_dir = f"plots/{ID_data_name}/acc_rank"
+    two_ood = False
+    if OOD_data_name2 is not None:
+        two_ood = True
 
     ood_means, ood_stds = get_mean_std(ID_data_name, OOD_data_name, model_name)
-    ood_means_2, ood_stds_2 = get_mean_std(ID_data_name, OOD_data_name2, model_name)
+    if two_ood:
+        ood_means_2, ood_stds_2 = get_mean_std(ID_data_name, OOD_data_name2, model_name)
 
     id_means, id_stds = get_mean_std(ID_data_name, ID_data_name, model_name)
 
     if add_rank:
-        singular_values = torch.load(
-            f"values/{ID_data_name}/singular_values/{ID_data_name}/{model_name}.pt"
-        )
+        singular_values = torch.load(f"values/{ID_data_name}/singular_values/{ID_data_name}/{model_name}.pt")
         ranks = get_rankme_ranks(singular_values)
         # ranks = get_original_ranks(singular_values)
 
@@ -857,13 +1087,12 @@ def plot_acc(
             labels=[str(x) for x in range(1, len(ood_means) + 1, 2)],
         )
     else:
-        plt.xticks(
-            range(1, len(ood_means) + 1), labels=[str(x) for x in range(1, len(ood_means) + 1)]
-        )
+        plt.xticks(range(1, len(ood_means) + 1), labels=[str(x) for x in range(1, len(ood_means) + 1)])
 
     ID_data_name = data_name_convert[ID_data_name]
     OOD_data_name = data_name_convert[OOD_data_name]
-    OOD_data_name2 = data_name_convert[OOD_data_name2]
+    if two_ood:
+        OOD_data_name2 = data_name_convert[OOD_data_name2]
 
     # plot ID
     ax1.plot(range(1, len(id_means) + 1), id_means, label=f"ID ({ID_data_name})", color=ID_COLOR)
@@ -876,9 +1105,7 @@ def plot_acc(
     )
 
     # plot OOD1
-    ax1.plot(
-        range(1, len(ood_means) + 1), ood_means, label=f"OOD ({OOD_data_name})", color=OOD_COLOR
-    )
+    ax1.plot(range(1, len(ood_means) + 1), ood_means, label=f"OOD ({OOD_data_name})", color=OOD_COLOR)
     ax1.fill_between(
         range(1, len(ood_means) + 1),
         ood_means - ood_stds,
@@ -888,19 +1115,20 @@ def plot_acc(
     )
 
     # plot OOD2
-    ax1.plot(
-        range(1, len(ood_means_2) + 1),
-        ood_means_2,
-        label=f"OOD ({OOD_data_name2})",
-        color=OOD_2_COLOR,
-    )
-    ax1.fill_between(
-        range(1, len(ood_means_2) + 1),
-        ood_means_2 - ood_stds_2,
-        ood_means_2 + ood_stds_2,
-        alpha=0.2,
-        color=OOD_2_COLOR,
-    )
+    if two_ood:
+        ax1.plot(
+            range(1, len(ood_means_2) + 1),
+            ood_means_2,
+            label=f"OOD ({OOD_data_name2})",
+            color=OOD_2_COLOR,
+        )
+        ax1.fill_between(
+            range(1, len(ood_means_2) + 1),
+            ood_means_2 - ood_stds_2,
+            ood_means_2 + ood_stds_2,
+            alpha=0.2,
+            color=OOD_2_COLOR,
+        )
 
     # Add best accuracy to y-ticks
     # yticks = list(plt.yticks()[0])
@@ -928,7 +1156,7 @@ def plot_acc(
 
     else:
         plt.legend(loc="upper left", frameon=True, framealpha=0.6)
-    plt.xlim(left=1, right=len(ood_means_2))
+    plt.xlim(left=1, right=len(ood_means))
 
     ax1.set_ylim(bottom=0)
     plt.tick_params(axis="both", which="major", labelsize=F)
@@ -938,18 +1166,38 @@ def plot_acc(
     # plt.yticks(yticks)
     # I want y ticks to be 0, 10, 20, 30, 40, 50, 60, 70, 80 ... current
     # plt.yticks(yticks)
-    all_acc = np.concatenate((id_means, ood_means, ood_means_2))
+    if two_ood:
+        all_acc = np.concatenate((id_means, ood_means, ood_means_2))
+    else:
+        all_acc = np.concatenate((id_means, ood_means))
     plt.yticks(np.arange(10, max(all_acc), 10))
 
     if not os.path.exists(os.path.dirname(save_dir)):
         os.makedirs(os.path.dirname(save_dir))
 
-    file_name = (
-        f"{model_name}{'_title' if add_title else ''}{'_normalized' if normalize else ''}.png"
-    )
+    file_name = f"{model_name}{'_title' if add_title else ''}{'_normalized' if normalize else ''}.png"
     if add_title:
         plt.title(f"{model_name_convert[model_name]} - {ID_data_name}")
     plt.savefig(f"{save_dir}/{file_name}", dpi=300)
+
+
+def plot_acc_ninco(model_name: str):
+    ninco_means, ninco_stds = get_mean_std("imagenet100", "ninco", model_name)
+    plt.figure(figsize=(10, 8))
+    plt.plot(range(1, len(ninco_means) + 1), ninco_means, color=ID_COLOR)
+    plt.fill_between(
+        range(1, len(ninco_means) + 1),
+        ninco_means - ninco_stds,
+        ninco_means + ninco_stds,
+        alpha=0.2,
+        color=ID_COLOR,
+    )
+
+    plt.title(f"model name - ninco")
+    plt.ylabel("Top-1 Accuracy [%]")
+    plt.xlabel("Layer")
+    plt.grid()
+    plt.savefig(f"{model_name}_ninco.png", dpi=300)
 
 
 def compute_correlation(ID_data_name, OOD_data_name, model_name):
@@ -959,11 +1207,211 @@ def compute_correlation(ID_data_name, OOD_data_name, model_name):
     return correlation
 
 
-if __name__ == "__main__":
-    # plot_NC_by_dataset_models("imagenet100", "NC1")
+def plot_GAP_full_comparision():
+    ID_DATA = "cifar10"
+    OOD_DATA = "cifar100"
+    m, s = get_mean_std(ID_DATA, ID_DATA, "resnet34")
+    o_m, o_s = get_mean_std(ID_DATA, OOD_DATA, "resnet34")
+    plt.figure(figsize=(10, 8))
+    plt.plot(
+        range(1, len(m) + 1),
+        m,
+        label=f"ID ({data_name_convert[ID_DATA]}) - GAP",
+        color=CB_color_cycle[0],
+    )
+    plt.fill_between(range(1, len(m) + 1), m - s, m + s, alpha=0.2, color=CB_color_cycle[0])
 
-    # plot_NC1_all()
-    plot_NC_all("imagenet100", "NC1")
+    plt.plot(
+        range(1, len(o_m) + 1),
+        o_m,
+        label=f"OOD ({data_name_convert[OOD_DATA]}) - GAP",
+        color=CB_color_cycle[1],
+    )
+    plt.fill_between(range(1, len(o_m) + 1), o_m - o_s, o_m + o_s, alpha=0.2, color=CB_color_cycle[1])
+
+    m, s = get_mean_std(ID_DATA, ID_DATA, "resnet34_xx")
+    o_m, o_s = get_mean_std(ID_DATA, OOD_DATA, "resnet34_xx")
+
+    plt.plot(
+        range(1, len(m) + 1),
+        m,
+        color=CB_color_cycle[2],
+        linestyle="dashed",
+        label=f"ID ({data_name_convert[ID_DATA]}) - Full Embedding",
+    )
+    plt.fill_between(range(1, len(m) + 1), m - s, m + s, alpha=0.2, color=CB_color_cycle[2])
+
+    plt.plot(
+        range(1, len(o_m) + 1),
+        o_m,
+        color=CB_color_cycle[3],
+        linestyle="dashed",
+        label=f"OOD ({data_name_convert[OOD_DATA]}) - Full Embedding",
+    )
+    plt.fill_between(range(1, len(o_m) + 1), o_m - o_s, o_m + o_s, alpha=0.2, color=CB_color_cycle[3])
+    set_plot(plt, m, xlabel="Layer", ylabel="Top-1 Accuracy [%]", normalize=False)
+    plt.savefig("GAP_full_comparision.png", dpi=300)
+
+
+def plot_GFlops():
+    GFlops = [0.229314048, 0.917101056, 3.668249088, 11.233906176]
+    resolutions = [r"$32 \times 32$", r"$64 \times 64$", r"$128 \times 128$", r"$224 \times 224$"]
+    plt.figure(figsize=(10, 8))
+    plt.bar(resolutions, GFlops, color=ID_COLOR, alpha=0.7)
+    plt.plot(resolutions, GFlops, color=ID_COLOR, alpha=0.7)
+
+    plt.ylabel("GFLOPS", size=F, fontweight="bold")
+    plt.xlabel("Image Resolution", size=F, fontweight="bold")
+    plt.tick_params(axis="both", which="major", labelsize=F)
+    plt.tick_params(axis="both", which="minor", labelsize=F)
+    plt.grid()
+    plt.savefig("GFlops.png", dpi=300)
+
+
+def plot_different_class_ninco():
+    ID_data_name = "imagenet"
+    OOD_data_name = "ninco"
+    save_dir = f"plots/{ID_data_name}/acc_rank"
+    vgg11_10_name = "vgg11_imagenet_class_10"
+    vgg11_50_name = "vgg11_imagenet_class_50"
+    vgg11_100_name = "vgg11_imagenet_samples_100"
+
+    means_10, std_10 = get_mean_std(ID_data_name, OOD_data_name, vgg11_10_name, True)
+    means_50, std_50 = get_mean_std(ID_data_name, OOD_data_name, vgg11_50_name, True)
+    means_100, std_100 = get_mean_std(ID_data_name, OOD_data_name, vgg11_100_name, True)
+    # means_10 = np.array([x / max(means_10) for x in means_10])
+    # means_50 = np.array([x / max(means_50) for x in means_50])
+    # means_100 = np.array([x / max(means_100) for x in means_100])
+
+    plt.figure(figsize=(10, 8))
+    plt.plot(
+        range(1, len(means_10) + 1),
+        means_10,
+        label=f"10 classes",
+        color=CB_color_cycle[0],
+    )
+    plt.fill_between(
+        range(1, len(means_10) + 1),
+        means_10 - std_10,
+        means_10 + std_10,
+        alpha=0.2,
+        color=CB_color_cycle[0],
+    )
+    plt.plot(
+        range(1, len(means_10) + 1),
+        means_50,
+        label=f"50 classes",
+        color=CB_color_cycle[1],
+    )
+    plt.fill_between(
+        range(1, len(means_10) + 1),
+        means_50 - std_50,
+        means_50 + std_50,
+        alpha=0.2,
+        color=CB_color_cycle[1],
+    )
+
+    plt.plot(
+        range(1, len(means_10) + 1),
+        means_100,
+        label=f"100 classes",
+        color=CB_color_cycle[2],
+    )
+    plt.fill_between(
+        range(1, len(means_10) + 1),
+        means_100 - std_100,
+        means_100 + std_100,
+        alpha=0.2,
+        color=CB_color_cycle[2],
+    )
+    set_plot(plt, means_10, xlabel="Layer", ylabel="Normalized Top-1 Accuracy [%]", normalize=False)
+    plt.legend(loc="lower right", frameon=True, framealpha=0.6)
+
+    plt.savefig("different_class_ninco.png", dpi=300)
+
+
+def plot_different_samples_ninco():
+    ID_data_name = "imagenet"
+    OOD_data_name = "ninco"
+    save_dir = f"plots/{ID_data_name}/acc_rank"
+    vgg11_100_name = "vgg11_imagenet_samples_100"
+    vgg11_200_name = "vgg11_imagenet_samples_200"
+    vgg11_500_name = "vgg11_imagenet_samples_500"
+    vgg11_1000_name = "vgg11_imagenet_samples_1000"
+
+    means_100, std_100 = get_mean_std(ID_data_name, OOD_data_name, vgg11_100_name, True)
+    means_200, std_200 = get_mean_std(ID_data_name, OOD_data_name, vgg11_200_name, True)
+    means_500, std_500 = get_mean_std(ID_data_name, OOD_data_name, vgg11_500_name, True)
+    means_1000, std_1000 = get_mean_std(ID_data_name, OOD_data_name, vgg11_1000_name, True)
+    plt.figure(figsize=(10, 8))
+    plot_acc_mean_std(
+        plt,
+        means_100,
+        std_100,
+        f"100 samples",
+        CB_color_cycle[0],
+    )
+    plot_acc_mean_std(
+        plt,
+        means_200,
+        std_200,
+        f"200 samples",
+        CB_color_cycle[1],
+    )
+    plot_acc_mean_std(
+        plt,
+        means_500,
+        std_500,
+        f"500 samples",
+        CB_color_cycle[2],
+    )
+    plot_acc_mean_std(
+        plt,
+        means_1000,
+        std_1000,
+        f"1000 samples",
+        CB_color_cycle[3],
+    )
+
+    set_plot(plt, means_100, xlabel="Layer", ylabel="Normalized Top-1 Accuracy [%]", normalize=False)
+
+    plt.savefig("different_samples_ninco.png", dpi=300)
+
+
+def plot_acc_mean_std(plt, means, std, label, color):
+    plt.plot(
+        range(1, len(means) + 1),
+        means,
+        label=label,
+        color=color,
+    )
+    plt.fill_between(
+        range(1, len(means) + 1),
+        means - std,
+        means + std,
+        alpha=0.2,
+        color=color,
+    )
+
+
+# scp -r ./data/NINCO kyungbok@klab-server2.rit.edu:/home/kyungbok/ninco
+if __name__ == "__main__":
+    for model in ["vit_tiny_patch8_imagenet100_64"]:
+        # plot_compare_aug(model)
+        plot_acc("imagenet100", "ninco", None, model, add_rank=False, add_title=True)
+    # plot_acc_ninco("vit_tiny_patch8_imagenet100_64")
+    # plot_ranks_vgg11_different_sample_size()
+    # plot_acc(
+    #     "imagenet",
+    #     "places",
+    #     "ninco",
+    #     "vgg11_imagenet_class_10-2",
+    #     add_rank=False,
+    #     add_title=False,
+    # )
+
+    # plot_different_class_ninco()
+    # plot_different_samples_ninco()
 
     # original_error = torch.load("values/errors/resnet34/original_32768.pt")
     # projection_error = torch.load("values/errors/resnet34/projection_32768.pt")
@@ -1010,6 +1458,7 @@ if __name__ == "__main__":
     # plot_NC1_resolution()
 
     # plot_resolution_NC2()
+    # plot_acc("imagenet100", "places", "ninco", "vgg13_imagenet100_down_up", add_rank=False)
 
     # for model_name in model_names:
     #     id_data = "imagenet100"
@@ -1053,3 +1502,4 @@ if __name__ == "__main__":
     # models = ["resnet34", "resnet50_swav", "convnext", "resnet50"]
 
     # resnet50
+    # plot_NC2_all()
