@@ -7,6 +7,8 @@ from abc import ABCMeta, abstractmethod
 import numpy as np
 import torch
 from sklearn.metrics.pairwise import euclidean_distances
+
+sys.path.append("A-ViT")
 from timm.models.vision_transformer import Block
 from torch import nn, optim
 from torchvision.models.swin_transformer import SwinTransformerBlock
@@ -22,6 +24,7 @@ from utils.utils import (
     mean_center,
     random_projection_method,
     stable_rank,
+    vectorize_cls_token,
     vectorize_global_avg_pooling,
     vectorize_global_max_pooling,
 )
@@ -62,18 +65,14 @@ class Analyzer(metaclass=ABCMeta):
             self.OOD = False
         elif self.data_name in ["cifar100", "places", "ninco"]:
             self.OOD = True
-
+        self.lr = 0.001
         self.singular_values = []
         self.variances = []
         self.ranks = []
         self.skip_layers = False
         self.skip_numbers = 2
         self.device = torch.device(
-            "cuda"
-            if torch.cuda.is_available()
-            else "mps"
-            if torch.backends.mps.is_available()
-            else "cpu"
+            "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
         )
         self.device = "cpu"
         self.total_samples = 0
@@ -83,6 +82,7 @@ class Analyzer(metaclass=ABCMeta):
         self.criterion = nn.CrossEntropyLoss()
 
         self.layers = self.get_layers()
+        print(f"layer counts: {len(self.layers)}")
 
         # if self.dummy_data.size(-1) > 32:
         #     self.random_projection_train = True
@@ -97,10 +97,21 @@ class Analyzer(metaclass=ABCMeta):
         pass
 
     # register any hooks
-    def register_hooks(self, func: callable):
-        for layer in self.layers:
-            hook = layer.register_forward_hook(func)
-            self.hooks.append(hook)
+    def register_hooks(self, func: callable, only_last_layer=False):
+        # avit model does not call forward inside of block
+        if "avit" in self.name.lower():
+            for layer in self.layers:
+                hook = layer.register_forward_act_hook(func)
+                self.hooks.append(hook)
+        else:
+            if only_last_layer:
+                # register only last layer
+                hook = self.layers[-1].register_forward_hook(func)
+                self.hooks.append(hook)
+            else:
+                for layer in self.layers:
+                    hook = layer.register_forward_hook(func)
+                    self.hooks.append(hook)
 
     # save target layer
     def hook_save_target_layer(self, module, input, output):
@@ -111,27 +122,37 @@ class Analyzer(metaclass=ABCMeta):
 
     # attach full layer
     def hook_full(self, module, input, output):
+        output = output.detach().cpu().to(self.classifier_device)
         output = self.preprocess_output(output)
+
         self.representations.append(output)
 
     def hook_vectorization(self, resolution):
-        # if self.data_name in ["places", "imagenet", "ninco"]:
-        #     patch_size = 4
         print(f"resolution: {resolution}")
         print(f"data name: {self.data_name}")
+        # if resolution == 224:
+        #     patch_size = 6
+        # elif resolution == 128:
+        #     patch_size = 4
+        # else:
+        #     patch_size = 2
         if resolution == 224:
-            patch_size = 6
-        elif resolution == 128:
             patch_size = 4
         else:
             patch_size = 2
 
-        print(f"patch size: {patch_size}")
-
         def hook_vectorization_helper(module, input, output):
-            output = vectorize_global_avg_pooling(
-                output, patch_size, normalize=True, device=self.classifier_device
-            )
+            output = output.detach().cpu().to(self.classifier_device)
+            if len(output.size()) == 4:
+                print(f"patch size: {patch_size}")
+                # if cnn
+                output = vectorize_global_avg_pooling(
+                    output, patch_size, normalize=True, device=self.classifier_device
+                )
+            elif len(output.size()) == 3:
+                # if transformer
+                output = vectorize_cls_token(output, normalize=True, device=self.classifier_device)
+
             self.representations.append(output)
 
         return hook_vectorization_helper
@@ -161,9 +182,7 @@ class Analyzer(metaclass=ABCMeta):
         output = self.preprocess_output(output)
         target = self.labels
 
-        torch.save(
-            output, f"values/{self.data_name}/representations/{self.name}_{self.feature_num}.pt"
-        )
+        torch.save(output, f"values/{self.data_name}/representations/{self.name}_{self.feature_num}.pt")
         self.feature_num += 1
 
     def hook_compute_stable_rank(self, module, input, ouput):
@@ -247,9 +266,7 @@ class Analyzer(metaclass=ABCMeta):
         centered_class_means = class_means - mu_G
 
         # Normalize the centered class means to get the simplex ETF structure vectors
-        simplex_vectors = centered_class_means / torch.norm(
-            centered_class_means, dim=1, keepdim=True
-        )
+        simplex_vectors = centered_class_means / torch.norm(centered_class_means, dim=1, keepdim=True)
 
         # Compute pairwise cosine similarity for all class mean pairs
         cosine_similarities = torch.mm(simplex_vectors, simplex_vectors.t())
@@ -266,9 +283,7 @@ class Analyzer(metaclass=ABCMeta):
         # to avoid counting pairs twice and including the diagonal
         upper_triangle_indices = torch.triu_indices(row=C, col=C, offset=1)
         mean_similarity = (
-            adjusted_cosine_similarities[upper_triangle_indices[0], upper_triangle_indices[1]]
-            .mean()
-            .item()
+            adjusted_cosine_similarities[upper_triangle_indices[0], upper_triangle_indices[1]].mean().item()
         )
         # std_similarity = (
         #     adjusted_cosine_similarities[upper_triangle_indices[0], upper_triangle_indices[1]]
@@ -371,7 +386,7 @@ class Analyzer(metaclass=ABCMeta):
         for i, representation in enumerate(self.representations):
             cur_classifier = nn.Linear(representation.size(1), num_classes)
 
-            cur_optim = optim.Adam(cur_classifier.parameters(), lr=0.001)
+            cur_optim = optim.Adam(cur_classifier.parameters(), lr=self.lr)
             cur_classifier.to(self.classifier_device)
             self.classifiers.append(cur_classifier)
             self.optimizers.append(cur_optim)
@@ -379,6 +394,9 @@ class Analyzer(metaclass=ABCMeta):
     def check_folder(self, path):
         if not os.path.exists(path):
             os.makedirs(path)
+
+    def set_lr(self, lr):
+        self.lr = lr
 
     @abstractmethod
     def preprocess_output(self, output) -> torch.FloatTensor:
@@ -463,14 +481,18 @@ class Analyzer(metaclass=ABCMeta):
         self.model.to(self.main_device)
         self.classifier_device = classifier_device
 
-    def download_accuarcy(self, train_dataloader, test_dataloader, pretrained_data, resolution):
+    def download_accuarcy(self, train_dataloader, test_dataloader, pretrained_data, resolution, GAP=True):
         # create folder
-        save_path = f"values/{pretrained_data}/{'acc' if not self.OOD else f'ood_acc/{self.data_name}'}/{self.name}"
+        save_path = (
+            f"values/{pretrained_data}/{'acc' if not self.OOD else f'ood_acc/{self.data_name}'}/{self.name}"
+        )
         self.check_folder(save_path)
 
         # register hooks
-        if self.name in ["mlp"]:
+        if not GAP:
+            print("use full hook")
             self.register_hooks(self.hook_full)
+
         else:
             self.register_hooks(self.hook_vectorization(resolution=resolution))
 
@@ -489,6 +511,13 @@ class Analyzer(metaclass=ABCMeta):
         torch.save(accuracies, file_path)
 
         self.remove_hooks()
+
+    def check_last_layer_acc(self, train_dataloader, test_dataloader, resolution):
+        self.register_hooks(self.hook_vectorization(resolution=resolution), only_last_layer=True)
+        self.init_classifers(resolution)
+        self.train_classifers(train_dataloader)
+        acc = self.test_classifers(test_dataloader)[0]
+        return acc
 
     def remove_hooks(self):
         for hook in self.hooks:
@@ -534,9 +563,7 @@ class Analyzer(metaclass=ABCMeta):
                     # loss = self.criterion(output, target)
                     correct = output.argmax(dim=1).eq(target).sum().item()
                     accuracies[idx] += correct
-        accuracies = [
-            round(100.0 * correct / len(test_loader.dataset), 2) for correct in accuracies
-        ]
+        accuracies = [round(100.0 * correct / len(test_loader.dataset), 2) for correct in accuracies]
         print(f"accuracy: {accuracies}")
         return accuracies
         # plot accuracy
@@ -718,6 +745,23 @@ class SwinAnalyzer(Analyzer):
         return output
 
 
+class AVITAnalyzer(Analyzer):
+    def __init__(self, model, model_name, data_name):
+        super().__init__(model, model_name, data_name)
+
+    def get_layers(self):
+        layers = []
+        for module in self.model.modules():
+            if isinstance(module, Block_ACT):
+                layers.append(module)
+        return layers
+
+    def preprocess_output(self, output):
+        output = output[:, 1:]
+        output = output.view(output.size(0), -1)
+        return output
+
+
 class VITAnalyzer(Analyzer):
     def __init__(self, model, model_name, data_name):
         super().__init__(model, model_name, data_name)
@@ -764,6 +808,8 @@ def get_analyzer(model, model_name: str, dummy_input):
         return ResNetAnalyzer(model, model_name, dummy_input)
     elif "convnextv2" in model_name.lower():
         return ConvNextV2Analyzer(model, model_name, dummy_input)
+    elif "avit" in model_name.lower():
+        return AVITAnalyzer(model, model_name, dummy_input)
 
     elif "vit" in model_name.lower():
         return VITAnalyzer(model, model_name, dummy_input)
