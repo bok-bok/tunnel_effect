@@ -8,17 +8,16 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torchvision.models import vgg13_bn
 from tqdm import tqdm
 
-from data_loader import get_data_loader
+from data_loader import get_down_up_sampled_Imagenet100_dataloader
 from models import VGG
-from models.models import get_vgg13_by_class_num
 from utils.utils import EarlyStopper
 
 
 def train(model, device, train_dataset, test_dataset, learning_rate, weight_decay, epochs):
-    save_dir = f"weights/vgg13/{class_num}/{str(learning_rate) + '_' + str(weight_decay)}"
+    save_dir = f"weights/vgg13/down_up/{str(learning_rate) + '_' + str(weight_decay)}"
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
-    model_name = f"{class_num}"
+    model_name = f"{size}"
 
     scaler = GradScaler()
     early_stopper = EarlyStopper(patience=10)
@@ -31,23 +30,23 @@ def train(model, device, train_dataset, test_dataset, learning_rate, weight_deca
         model.train()
         running_loss = 0.0
         correct = 0
-        for data, target in train_dataset:
+        for data, target in tqdm(train_dataset):
             data, target = data.to(device), target.to(device)
-            # with autocast():
-            #     output = model(data)
-            #     loss = criterion(output, target)
+            with autocast():
+                output = model(data)
+                loss = criterion(output, target)
 
-            # optimizer.zero_grad()
-
-            # scaler.scale(loss).backward()
-            # scaler.step(optimizer)
-            # scaler.update()
-
-            output = model(data)
-            loss = criterion(output, target)
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
+            # output = model(data)
+            # loss = criterion(output, target)
+            # optimizer.zero_grad()
+            # loss.backward()
+            # optimizer.step()
 
             correct += output.argmax(dim=1).eq(target).sum().item()
             running_loss += loss.item() * data.size(0)
@@ -58,7 +57,7 @@ def train(model, device, train_dataset, test_dataset, learning_rate, weight_deca
         print(
             f"epoch: {epoch} | loss: {running_loss:.2f} |val_L :{val_loss:.2f} | acc: {train_acc}% | test_acc: {test_acc}%"
         )
-        if epoch % 10 == 0:
+        if epoch % 5 == 0:
             torch.save(model.state_dict(), f"{save_dir}/{model_name}_{epoch}_{test_acc}.pth")
 
         # check early stop
@@ -92,9 +91,7 @@ def validate(model, test_dataset, criterion, device):
 
 def parser():
     parser = argparse.ArgumentParser(description="Get GPU numbers")
-
-    parser.add_argument("--class_num", type=int, required=True, help="Model name")
-
+    parser.add_argument("--size", type=int, required=True, help="Model name")
     parser.add_argument("--batch_size", type=int, required=True, help="Batch size")
 
     parser.add_argument("--lr", type=float, required=True, help="Batch size")
@@ -105,7 +102,7 @@ def parser():
 
     args = parser.parse_args()
     return (
-        args.class_num,
+        args.size,
         args.batch_size,
         args.lr,
         args.wd,
@@ -114,26 +111,20 @@ def parser():
     )
 
 
-class_num_to_samples_size = {10: 1000, 50: 200, 100: 100, 1000: 10}
-
 if __name__ == "__main__":
-    class_num, batch_size, learning_rate, weight_decay, epochs, device = parser()
-
-    samples_size = class_num_to_samples_size[class_num]
-
-    test_samples_size = 50
+    size, batch_size, learning_rate, weight_decay, epochs, device = parser()
 
     device = f"cuda:{device}"
-    model = get_vgg13_by_class_num(class_num, pretrained=False)
-    model.train()
-    data_name = "imagenet"
-    train_dataloader, test_dataloader = get_data_loader(
-        data_name,
-        train_samples_per_class=samples_size,
-        test_samples_per_class=test_samples_size,
-        class_num=class_num,
-        batch_size=batch_size,
+    device = "cuda"
+
+    train_dataloader, test_dataloader = get_down_up_sampled_Imagenet100_dataloader(
+        batch_size, classes_num=None, use_all=True
     )
+
+    model = VGG("VGG13")
+    model = nn.DataParallel(model)
+
+    model.train()
 
     train(
         model,

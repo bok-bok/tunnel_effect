@@ -1,23 +1,15 @@
 import argparse
+import logging
 import ssl
-import time
-
-import torch
-from PIL import Image
 
 from analyzer import get_analyzer
-from data_loader import (
-    get_balanced_imagenet_input_data,
-    get_cifar_input_data,
-    get_data_loader,
-)
+from data_loader import get_data_loader
 from utils import get_model
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
 # use pydantic create a data data_name class that can be only cifar10 or imagent
 # code here
-class_num_to_samples_size = {10: 1000, 50: 200, 100: 100, 1000: 10}
 
 
 def parser():
@@ -38,35 +30,21 @@ def parser():
 if __name__ == "__main__":
     model_name, pretrained_data, data_name, batch_size, main_device, classifier_device = parser()
     pretrained = True
-    resolution = 224
-
-    if "10" in model_name:
-        class_num = 10
-    elif "50" in model_name:
-        class_num = 50
-    elif "100" in model_name:
-        class_num = 100
-    elif "1000" in model_name:
-        class_num = 1000
-    else:
-        raise ValueError("class_num not found")
-
-    train_sample_per_class = class_num_to_samples_size[class_num]
-    test_sample_per_class = 50
-    if data_name != "imagenet":
-        class_num = None
+    # if data_name != "imagenet":
+    #     class_num = None
+    class_num = 100
 
     weight_path = f"weights/{model_name}.pth"
     # use model_name and pretrained to get model
     model = get_model(model_name, data_name, pretrained, weight_path)
     # main_device = "cpu"
     model.to(main_device)
-    print(class_num)
 
+    resolution = 32
     train_dataloader, test_dataloader = get_data_loader(
         data_name,
-        train_sample_per_class,
-        test_sample_per_class,
+        train_samples_per_class=None,
+        test_samples_per_class=None,
         class_num=class_num,
         batch_size=batch_size,
         resolution=resolution,

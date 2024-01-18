@@ -1,3 +1,6 @@
+import logging
+import os
+
 import torch
 import torch.optim as optim
 import torchvision
@@ -6,10 +9,14 @@ from torch.utils.data import DataLoader
 from torchvision.models import resnet34
 from tqdm import tqdm
 
+save_dir = "weights/resnet34"
+if not os.path.exists(save_dir):
+    os.mkdir(save_dir)
+
 model = resnet34(pretrained=False)
 
-
-model.maxpool = torch.nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+model.maxpool = nn.Identity()
 model.fc = nn.Linear(512, 10)
 
 
@@ -54,11 +61,15 @@ optimizer = optim.SGD(
 scheduler = torch.optim.lr_scheduler.MultiStepLR(
     optimizer, milestones=lr_decay_milestones, gamma=lr_decay_gamma
 )
-device = "cuda:1"
+device = "cuda:3"
 model.to(device)
+logging.basicConfig(
+    filename=f"{save_dir}/training_log.log",
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s:%(message)s",
+)
 
-
-for epoch in range(num_epochs):
+for epoch in range(1, num_epochs + 1):
     running_loss = 0.0
     correct_count = 0
     for i, data in enumerate(train_loader):
@@ -73,14 +84,18 @@ for epoch in range(num_epochs):
         correct_count += torch.sum(torch.argmax(outputs, dim=1) == labels).item()
     with torch.no_grad():
         val_correct = 0
+        val_loss = 0.0
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
+            val_loss += criterion(output, target).item() * len(data)
             val_correct += output.argmax(dim=1).eq(target).sum().item()
     scheduler.step()
-    print(
-        f"Epoch: {epoch+1}, Loss: {running_loss/len(train_loader)} Accuracy: {round(correct_count/len(train_dataset),2)} Val_ACC: {round(val_correct / len(test_dataset),2)}"
+    logging.info(
+        f"Epoch: {epoch}, Loss: {running_loss/len(train_loader)} Accuracy: {round(correct_count/len(train_dataset),2)} Val_Loss:{val_loss/len(test_loader)} Val_ACC: {round(val_correct / len(test_dataset),2)}"
     )
+    if epoch % 30 == 0:
+        torch.save(model.state_dict(), f"{save_dir}/resnet34_{epoch}.pth")
 
 
-torch.save(model.state_dict(), f"resnet_true.pth")
+torch.save(model.state_dict(), f"{save_dir}/resnet34_final.pth")
