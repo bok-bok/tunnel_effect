@@ -7,3 +7,5 @@ data
 *.png
 /src/values/representations
 /src/values/full_sigs
+/src/values
+/src/weights
