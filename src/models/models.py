@@ -2,6 +2,9 @@ import math
 import sys
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
+from functools import partial
+
+sys.path.append("A-ViT")
 
 import numpy as np
 import torch
@@ -9,20 +12,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler, normalize
+from timm import create_model
 from timm.models.layers import DropPath, trunc_normal_
+from timm.models.vision_transformer import Block, VisionTransformer
 from torchvision import models
 from torchvision.models import resnet34
 
+import models.vit_models
+from models.resnet18 import get_resnet18
 from models.vgg import VGG
 
 # from models.resnet_models_GN_WS import resnet34
-
-sys.path.append("models/mae")
-sys.path.append("models/CLIP")
-sys.path.append("models/CLIP/clip")
-
-from models.CLIP.clip import ResidualAttentionBlock
-from models.mae.util.pos_embed import interpolate_pos_embed
 
 
 class ResNet(nn.Module, metaclass=ABCMeta):
@@ -35,9 +35,7 @@ class ResNet(nn.Module, metaclass=ABCMeta):
         """
         super().__init__()
         self.init_model()
-        self.resnet.conv1 = nn.Conv2d(
-            3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
-        )
+        self.resnet.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
         self.resnet.maxpool = nn.Identity()
         # self.resnet.bn1 = nn.BatchNorm2d(64)
         # self.resnet.maxpool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
@@ -203,9 +201,7 @@ def remap_checkpoint_keys(ckpt):
             if len(v.shape) == 3:  # resahpe standard convolution
                 kv, in_dim, out_dim = v.shape
                 ks = int(math.sqrt(kv))
-                new_ckpt[new_k] = (
-                    v.permute(2, 1, 0).reshape(out_dim, in_dim, ks, ks).transpose(3, 2)
-                )
+                new_ckpt[new_k] = v.permute(2, 1, 0).reshape(out_dim, in_dim, ks, ks).transpose(3, 2)
             elif len(v.shape) == 2:  # reshape depthwise convolution
                 kv, dim = v.shape
                 ks = int(math.sqrt(kv))
@@ -340,9 +336,7 @@ class Block(nn.Module):
         super().__init__()
         self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)  # depthwise conv
         self.norm = LayerNorm(dim, eps=1e-6)
-        self.pwconv1 = nn.Linear(
-            dim, 4 * dim
-        )  # pointwise/1x1 convs, implemented with linear layers
+        self.pwconv1 = nn.Linear(dim, 4 * dim)  # pointwise/1x1 convs, implemented with linear layers
         self.act = nn.GELU()
         self.grn = GRN(4 * dim)
         self.pwconv2 = nn.Linear(4 * dim, dim)
@@ -480,7 +474,7 @@ def get_vgg13_imagenet100(model_name, pretrained=True):
                 name = k[7:]  # remove `module.` prefix
                 new_state_dict[name] = v
 
-        model.load_state_dict(new_state_dict)
+        model.load_state_dict(state_dict)
 
     return model
 
@@ -502,6 +496,16 @@ def initialize_weights(m):
 # }
 
 
+Resnet34_resolution_weights = {
+    32: "0.001/0.0001/32_25_52.04.pth",
+    64: "0.001/0.0001/64_25_57.74.pth",
+    128: "0.001/0.0001/128_20_57.7.pth",
+    224: "0.001/0.0001/224_20_66.46.pth",
+}
+
+Resnet34_wide_resolution_weights = {224: "0.001/0.0001/224_30_44.78.pth"}
+
+
 def get_resnet34_by_resolution(image_resolution, class_num=100, pretrained=True):
     if image_resolution not in [32, 64, 128, 224]:
         raise ValueError(f" {image_resolution} image resolution not found")
@@ -511,15 +515,73 @@ def get_resnet34_by_resolution(image_resolution, class_num=100, pretrained=True)
 
     # modify layers to fit image resolution
     if image_resolution in [32, 64]:
-        model.conv1 = nn.Conv2d(
-            3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
-        )
+        model.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
 
         if image_resolution == 32:
             model.maxpool = nn.Identity()
 
     # change last layer
     model.fc = nn.Linear(512, class_num)
+
+    # load pretrained weights
+    if pretrained:
+        print("loading wide resnet34")
+        file_name = Resnet34_wide_resolution_weights[image_resolution]
+        state_dict = torch.load(f"weights/resnet34_resolutions/{image_resolution}/{file_name}")
+        print(f"loading {image_resolution}-{file_name}")
+        model.load_state_dict(state_dict)
+
+    return model
+
+
+ResNet18_pretrained_weights_by_resolution = {
+    32: "0.001/0.01/32_30_51.0.pth",
+    64: "0.001/0.01/64_30_64.4.pth",
+    128: "0.001/0.0/128_30_67.5.pth",
+    224: "0.001/0.0/224_35_72.52.pth",
+}
+
+ResNet18_original_pretrained_weights_by_resolution = {32: "0.1/0.0001/32_final.pth"}
+
+ResNet18_no_residual_pretrained_weights_by_resolution = {
+    32: "0.001/0.01/32_30_43.84.pth",
+    64: "0.001/0.001/64_40_58.46.pth",
+    128: "0.001/0.001/128_40_59.68.pth",
+    224: "0.001/0.001/224_40_62.92.pth",
+}
+
+ResNet18_augmentation_pretrained_weights_by_resolution = {
+    32: "0.001/0.0001/32_60_61.26.pth",
+    64: "0.001/0.0001/64_60_73.0.pth",
+    128: "0.001/0.0001/128_70_75.68.pth",
+    224: "0.001/0.0001/224_70_79.92.pth",
+}
+
+
+def get_resnet18_by_resolution(
+    image_resolution, class_num=100, residual_connection=True, pretrained=False, augmentation=False
+):
+    model = get_resnet18(nclasses=class_num, residual_connection=residual_connection)
+    if image_resolution in [128, 224]:
+        model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1, bias=False)
+    if pretrained:
+        # file_name = ResNet18_pretrained_weights_by_resolution[image_resolution]
+        if augmentation:
+            print("loading augmentation model")
+            file_name = ResNet18_augmentation_pretrained_weights_by_resolution[image_resolution]
+            state_dict = torch.load(f"weights/resnet18_resolution_aug/{image_resolution}/{file_name}")
+
+        elif residual_connection:
+            file_name = ResNet18_original_pretrained_weights_by_resolution[image_resolution]
+            state_dict = torch.load(f"weights/resnet18_resolutions_original/{image_resolution}/{file_name}")
+
+        else:
+            file_name = ResNet18_no_residual_pretrained_weights_by_resolution[image_resolution]
+            state_dict = torch.load(
+                f"weights/resnet18_resolutions_no_residual/{image_resolution}/{file_name}"
+            )
+        print(f"loading {image_resolution}-{file_name}")
+        model.load_state_dict(state_dict)
 
     return model
 
@@ -587,3 +649,51 @@ def remove_module_prefix(state_dict):
         name = k[7:]  # remove `module.` prefix
         new_state_dict[name] = v
     return new_state_dict
+
+
+def get_vit_tiny_patch8(image_resolution):
+    weights_path_dict = {
+        64: "weights/vit/64.pth",
+    }
+
+    checkpoint = torch.load(weights_path_dict[image_resolution])
+    args = checkpoint["args"]
+    model = create_model(
+        args.model,
+        pretrained=False,  # args.pretrained,
+        img_size=args.input_size,
+        num_classes=args.nb_classes,
+        drop_rate=args.drop,
+        drop_path_rate=args.drop_path,
+        drop_block_rate=None,
+        args=args,
+    )
+    checkpoint_model = checkpoint["model"]
+    state_dict = model.state_dict()
+    for k in ["head.weight", "head.bias", "head_dist.weight", "head_dist.bias"]:
+        if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+            print(f"Removing key {k} from pretrained checkpoint")
+            del checkpoint_model[k]
+
+    # interpolate position embedding
+    pos_embed_checkpoint = checkpoint_model["pos_embed"]
+    embedding_size = pos_embed_checkpoint.shape[-1]
+    num_patches = model.patch_embed.num_patches
+    num_extra_tokens = model.pos_embed.shape[-2] - num_patches
+    # height (== width) for the checkpoint position embedding
+    orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
+    # height (== width) for the new position embedding
+    new_size = int(num_patches**0.5)
+    # class_token and dist_token are kept unchanged
+    extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
+    # only the position tokens are interpolated
+    pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
+    pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
+    pos_tokens = torch.nn.functional.interpolate(
+        pos_tokens, size=(new_size, new_size), mode="bicubic", align_corners=False
+    )
+    pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
+    new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
+    checkpoint_model["pos_embed"] = new_pos_embed
+    model.load_state_dict(checkpoint_model, strict=False)
+    return model

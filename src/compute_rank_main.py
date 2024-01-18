@@ -25,13 +25,14 @@ def parser():
     parser.add_argument("--input_size", type=int, default=15000, help="Input size")
     parser.add_argument("--random", action="store_true", help="Random projection")
     parser.add_argument("--resolution", type=int, default=224, help="Image resolution")
+    parser.add_argument("--num_classes", type=int, default=100, help="Number of classes")
     args = parser.parse_args()
-    return args.model, args.data, args.random, args.input_size, args.resolution
+    return args.model, args.data, args.random, args.input_size, args.resolution, args.num_classes
 
 
 if __name__ == "__main__":
     start = time.time()
-    model_name, data_name, RANDOM, input_size, resolution = parser()
+    model_name, data_name, RANDOM, input_size, resolution, num_classes = parser()
     if RANDOM:
         pretrained = False
     else:
@@ -56,7 +57,9 @@ if __name__ == "__main__":
         )
     elif data_name == "imagenet":
         print("Loading imagenet data")
-        input_data = get_balanced_imagenet_input_data(input_size)
+        input_data = get_balanced_imagenet_input_data(
+            input_size, resolution=resolution, num_classes=num_classes
+        )
     elif data_name == "places":
         print("Loading Places data")
         input_data = get_balanced_places_input_data(input_size)
