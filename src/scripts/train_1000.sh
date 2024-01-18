@@ -1,20 +1,19 @@
 #!/bin/bash
 
-SIZE=64
-BATCH_SIZE=256
-
-LR=0.1
-WEIGHT_DECAY=1e-5
+CLASS_NUM=1000
+BATCH_SIZE=128
+ 
+LR=0.00001
+WEIGHT_DECAY=0
 EPOCHS=100
 
 
-GPU=1
+GPU=3
 
-python trainer.py \
-    --size $SIZE \
+python vgg13_classes_trainer.py \
+    --class_num $CLASS_NUM  \
     --batch_size $BATCH_SIZE \
     --lr $LR \
     --wd $WEIGHT_DECAY \
     --epochs $EPOCHS \
     --gpu $GPU \
-
