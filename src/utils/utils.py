@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+from functools import partial
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +11,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models
 from scipy.spatial.distance import cosine
-from timm.models.vision_transformer import vit_base_patch16_224
+from timm.models.registry import register_model
+from timm.models.vision_transformer import VisionTransformer, _cfg, vit_base_patch16_224
 from torchvision.models import (
     ConvNeXt_Base_Weights,
     ResNet18_Weights,
@@ -32,14 +34,20 @@ from models.models import (
     ResNet34,
     ResNet34_GN,
     convnextv2_fcmae,
+    get_resnet18_by_resolution,
     get_resnet34_by_resolution,
     get_vgg11_by_class_num,
     get_vgg11_by_sample_num,
     get_vgg13_imagenet100,
+    get_vit_tiny_patch8,
 )
+from models.resnet18 import get_resnet18
 
-sys.path.append("models/CLIP")
-sys.path.append("models/CLIP/clip")
+sys.path.append("A-ViT")
+
+
+def compute_maximum_mean_discrepancy(x, y):
+    pass
 
 
 def mean_center(X):
@@ -81,8 +89,15 @@ def random_projection_method(X, b, cov=False):
         return s.detach().cpu(), variance.detach().cpu()
 
 
+def vectorize_cls_token(x, normalize=True, device="cuda"):
+    cls_tokens = x[:, 0, :]
+    return cls_tokens
+
+
 def vectorize_global_avg_pooling(x, patch_size=2, normalize=False, device="cuda"):
     # check dim of x
+
+    # CNN
     if len(x.size()) == 4:
         if x.size(2) == 1 and x.size(3) == 1:
             print("cannot reduce spatial dim")
@@ -90,17 +105,24 @@ def vectorize_global_avg_pooling(x, patch_size=2, normalize=False, device="cuda"
             pass
         else:
             output = F.avg_pool2d(x, patch_size, stride=patch_size)
+
+    # Transformer
     elif len(x.size()) == 3:
-        # print(x.size())
         patch_size = 2
+        # remove class token
         x = x[:, 1:]
-        x_transposed = x.transpose(1, 2)
+        B, T, D = x.size()
+        if T > D:
+            # in case of act transformer
+            x_transposed = x
+        else:
+            x_transposed = x.transpose(1, 2)
+        # print(f"feature shape before processed {x.size()}")
         output = F.avg_pool1d(x_transposed, patch_size, stride=patch_size)
         output = output.transpose(1, 2)
 
         # output = F.avg_pool1d(x, patch_size, stride=patch_size)
         # print(output.size())
-    # print(output.size())
     output = output.reshape(output.size(0), -1)
     if normalize and output.size(0) > 1:
         sample_size, dim = output.size()
@@ -112,6 +134,7 @@ def vectorize_global_avg_pooling(x, patch_size=2, normalize=False, device="cuda"
         batch_norm.bias.requires_grad = False
 
         output = batch_norm(output)
+    # print(f"feature shape after GAP and normalization {output.size()}")
     return output
 
 
@@ -162,9 +185,40 @@ def get_model(model_name: str, dataset: str, pretrained: bool = True, weights_pa
     elif "vgg13_imagenet100" in model_name:
         print("loading vgg imagenet100 model")
         return get_vgg13_imagenet100(model_name, pretrained)
+    elif "resnet18_cifar10" in model_name:
+        model = get_resnet18(nclasses=10, nf=64, residual_connection=True)
+        # epochs = model_name.split("_")[2]
+        print("hi")
+        print("loading resnet18 cifar10 model")
+        state_dict = torch.load(f"weights/resnet18_cifar/32/0.001/0.0/32_50_92.4.pth")
+        model.load_state_dict(state_dict)
+        return model
+    elif "resnet18_imagenet100" in model_name:
+        print("loading resnet18 imagenet100 model")
+        residual_connection = True
+        augmentation = False
+        if "no_residual" in model_name:
+            residual_connection = False
+        if "aug" in model_name:
+            augmentation = True
+        resolution = get_resolution_from_model_name(model_name)
+        return get_resnet18_by_resolution(
+            resolution,
+            class_num=100,
+            residual_connection=residual_connection,
+            pretrained=pretrained,
+            augmentation=augmentation,
+        )
+
     elif "resnet34_imagenet100" in model_name:
         resolution = get_resolution_from_model_name(model_name)
-        return get_resnet34_by_resolution(resolution, class_num=class_num, pretrained=pretrained)
+        return get_resnet34_by_resolution(resolution, class_num=100, pretrained=pretrained)
+    # elif "avit_tiny_patch8_imagenet100" in model_name:
+    #     resolution = get_resolution_from_model_name(model_name)
+    #     return get_avit_tiny_patch8(resolution)
+    elif "vit_tiny_patch8_imagenet100" in model_name:
+        resolution = get_resolution_from_model_name(model_name)
+        return get_vit_tiny_patch8(resolution)
 
     else:
         return get_imagenet_model(model_name, pretrained)
@@ -209,9 +263,7 @@ def get_imagenet_model(model_name: str, pretrained=True):
                 if k not in list(state_dict):
                     print('key "{}" could not be found in provided state dict'.format(k))
                 elif state_dict[k].shape != v.shape:
-                    print(
-                        'key "{}" is of different shape in model and provided state dict'.format(k)
-                    )
+                    print('key "{}" is of different shape in model and provided state dict'.format(k))
                     state_dict[k] = v
             model.load_state_dict(state_dict, strict=False)
             return model
@@ -233,13 +285,6 @@ def get_imagenet_model(model_name: str, pretrained=True):
         print(f"loading {model_name}")
         model = timm.create_model(model_name, pretrained=True)
         return model
-    elif "clip" in model_name.lower():
-        if pretrained:
-            print("loading imagenet1k pretrained clip model")
-            return clip.load("ViT-B/32", jit=False)
-        else:
-            print("loading random init clip model")
-            return clip.load("ViT-B/32", jit=False, pretrained=False)
 
     elif "convnext" in model_name.lower():
         if pretrained:
@@ -279,15 +324,12 @@ def get_imagenet_model(model_name: str, pretrained=True):
 
 
 def get_cifar_model(model_name, pretrained=True, weights_path=None):
-    print(f"Loading {model_name} - cifar")
     if "resnet18" in model_name:
-        if pretrained:
-            if "swav" in model_name:
-                model = ResNet18(weights_path="weights/resnet18_swav.ckpt")
-            else:
-                model = ResNet18(weights_path="weights/resnet18.pth")
-        else:
-            model = ResNet18()
+        model = get_resnet18(nclasses=10, nf=64, residual_connection=True)
+        # epochs = model_name.split("_")[2]
+        print("loading resnet18 cifar10 model")
+        state_dict = torch.load(f"weights/resnet18_cifar/32/0.001/0.0/32_50_92.4.pth")
+        model.load_state_dict(state_dict)
     elif "resnet50" in model_name:
         if pretrained:
             model = torch.hub.load("facebookresearch/swav:main", "resnet50")
@@ -354,9 +396,7 @@ def load_pretrained_weights(model, pretrained_weights, checkpoint_key, model_nam
         # remove `encoder.` prefix induced by MAE
         state_dict = {k.replace("encoder.", ""): v for k, v in state_dict.items()}
         msg = model.load_state_dict(state_dict, strict=False)
-        print(
-            "Pretrained weights found at {} and loaded with msg: {}".format(pretrained_weights, msg)
-        )
+        print("Pretrained weights found at {} and loaded with msg: {}".format(pretrained_weights, msg))
     else:
         print("There is no reference weights available for this model => We use random weights.")
 
@@ -454,9 +494,7 @@ def computeNC1(labels, embeddings):
         class_embeddings = embeddings[:, labels == c]
         class_mean = mu_c[unique_classes == c].squeeze(0)
         # within_class_var += ((class_embeddings - class_mean) ** 2).sum()
-        within_class_var += (
-            (class_embeddings.T - class_mean) ** 2
-        ).sum()  # transpose to make it work
+        within_class_var += ((class_embeddings.T - class_mean) ** 2).sum()  # transpose to make it work
 
     normalized_within_class_var = within_class_var / embeddings.shape[1]
 
