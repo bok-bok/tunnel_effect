@@ -8,20 +8,27 @@ from torch.utils.data import DataLoader, Dataset, Subset, SubsetRandomSampler
 from torchvision import datasets, transforms
 from torchvision.transforms import InterpolationMode
 
+from datasets import build_dataset, filter_by_class
+
 PLACE_DIR = "/data/datasets/Places/places365_standard/small_easyformat"
+BASE_PATH = "/data/datasets"
 IMAGENET_DIR = "/data/datasets/ImageNet1K"
-IMAGENET_DIR = "/data/datasets/ImageNet2012"
+IMAGENET_DIR = f"{BASE_PATH}/ImageNet2012"
 # IMAGENET_DIR = "/home/tyler/data/ImageNet2012"
 
 NINCO_DIR = "data/NINCO/NINCO_OOD_classes"
 IMAGENET_100_DIR = "/data/datasets/ImageNet-100"
+IMAGENET_100_DIR = f"{BASE_PATH}/ImageNet-100"
 # IMAGENET_100_DIR = "/home/tolga/data/imagenet100"
+
 
 DIR_DICT = {
     "places": PLACE_DIR,
     "imagenet": IMAGENET_DIR,
     "ninco": NINCO_DIR,
     "imagenet100": IMAGENET_100_DIR,
+    "mnist": f"{BASE_PATH}/MNIST",
+    # "fashionmnist": f"{BASE_PATH}/FashionMNIST",
 }
 
 
@@ -32,17 +39,14 @@ def get_data_loader(
     resolution=224,
 ):
     if "cifar" in dataset_name:
-        train_transform, test_transform = get_CIFAR_transforms()
         if "100" in dataset_name:
-            return get_CIFAR_100_data_loader(train_transform, test_transform, batch_size)
+            return get_CIFAR_100_data_loader(batch_size)
         elif "10" in dataset_name:
-            return get_CIFAR_data_loader(train_transform, test_transform, batch_size)
+            return get_CIFAR_data_loader(batch_size, augmentation=True)
 
     elif dataset_name == "ninco":
         print("loading ninco data")
-        return get_NINCO_dataloader(
-            None, None, class_num, batch_size=batch_size, resolution=resolution
-        )
+        return get_NINCO_dataloader(None, None, class_num, batch_size=batch_size, resolution=resolution)
 
     elif dataset_name == "imagenet100":
         return get_ImageNet100_dataloader(resolution, batch_size, 100, use_all=False)
@@ -69,10 +73,34 @@ def get_data_loader(
         raise ValueError("dataset name not supported")
 
 
+def get_dataloader_resolution_32(dataset_name, class_num, batch_size=512):
+    """
+    Get dataloader for 32x32 resolution datasets
+        dataset_name: cifar10, cifar100, MNIST, FashionMNIST
+    """
+
+
+def get_MNIST_dataloader(batch_size=512, augmentation=False):
+    train_transform, test_transform = get_MNIST_transforms(augmentation=augmentation)
+
+    train_dataset = torchvision.datasets.MNIST(
+        root="./data", train=True, transform=train_transform, download=True
+    )
+    test_dataset = torchvision.datasets.MNIST(
+        root="./data", train=False, transform=test_transform, download=True
+    )
+
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    return train_dataloader, test_dataloader
+
+
 def get_imagenet_dataloader(class_num, train_sample_per_class, batch_size=512, resolution=32):
     train_dataset, test_dataset = get_balanced_dataset(
-        "imagenet", train_sample_per_class, 50, class_num, resolution=resolution
+        "imagenet", train_sample_per_class, None, class_num, resolution=resolution
     )
+    print(f"train dataset: {len(train_dataset)}")
+    print(f"test dataset: {len(test_dataset)}")
     train_dataloader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True
     )
@@ -82,7 +110,8 @@ def get_imagenet_dataloader(class_num, train_sample_per_class, batch_size=512, r
     return train_dataloader, test_dataloader
 
 
-def get_CIFAR_100_data_loader(train_transform, test_transform, batch_size=512, use_previous=False):
+def get_CIFAR_100_data_loader(batch_size=512, use_previous=False):
+    train_transform, test_transform = get_CIFAR_transforms(augmentation=True)
     # get 10 random classes from CIFAR100
     train_dataset = torchvision.datasets.CIFAR100(
         root="./data", train=True, transform=train_transform, download=True
@@ -101,9 +130,7 @@ def get_CIFAR_100_data_loader(train_transform, test_transform, batch_size=512, u
         print("creating new indices")
         classes = torch.randperm(100)[:10].tolist()
         # Get indices of desired classes
-        train_indices = [
-            i for i in range(len(train_dataset)) if train_dataset.targets[i] in classes
-        ]
+        train_indices = [i for i in range(len(train_dataset)) if train_dataset.targets[i] in classes]
         test_indices = [i for i in range(len(test_dataset)) if test_dataset.targets[i] in classes]
         # torch.save(train_indices, "values/cifar10/indices/train_indices.pt")
         # torch.save(test_indices, "values/cifar10/indices/test_indices.pt")
@@ -126,7 +153,8 @@ def get_CIFAR_100_data_loader(train_transform, test_transform, batch_size=512, u
     return train_dataloader, test_dataloader
 
 
-def get_CIFAR_data_loader(train_transform, test_trainsform, batch_size=512):
+def get_CIFAR_data_loader(batch_size=512, augmentation=False):
+    train_transform, test_trainsform = get_CIFAR_transforms(augmentation)
     train_dataset = torchvision.datasets.CIFAR10(
         root="./data", train=True, transform=train_transform, download=True
     )
@@ -173,14 +201,13 @@ def get_balanced_dataset(
     # create dataset
     train_dataset = datasets.ImageFolder(root=train_dir, transform=train_transform)
     val_dataset = datasets.ImageFolder(root=val_dir, transform=test_transform)
-
+    print(classes, train_samples_per_class, test_samples_per_class)
+    if classes is None and train_samples_per_class is None and test_samples_per_class is None:
+        print("using all data")
+        return train_dataset, val_dataset
     # get indices
-    train_indices = get_balanced_indices(
-        train_dataset, data_name, "train", train_samples_per_class, classes
-    )
-    test_indices = get_balanced_indices(
-        val_dataset, data_name, "val", test_samples_per_class, classes
-    )
+    train_indices = get_balanced_indices(train_dataset, data_name, "train", train_samples_per_class, classes)
+    test_indices = get_balanced_indices(val_dataset, data_name, "val", test_samples_per_class, classes)
     print(f"train indices: {len(train_indices)}")
     print(f"test indices: {len(test_indices)}")
 
@@ -248,9 +275,7 @@ def get_down_up_sampled_Imagenet100_dataloader(batch_size=512, classes_num=100, 
     train_indices = get_balanced_indices(
         train_dataset, data_name, "train", train_samples_per_class, classes_num
     )
-    test_indices = get_balanced_indices(
-        test_dataset, data_name, "val", test_samples_per_class, classes_num
-    )
+    test_indices = get_balanced_indices(test_dataset, data_name, "val", test_samples_per_class, classes_num)
     print(f"train indices: {len(train_indices)}")
     print(f"test indices: {len(test_indices)}")
 
@@ -263,12 +288,14 @@ def get_down_up_sampled_Imagenet100_dataloader(batch_size=512, classes_num=100, 
     return train_dataloader, test_dataloader
 
 
-def get_ImageNet100_dataloader(resolution_size, batch_size=512, classes_num=100, use_all=False):
+def get_ImageNet100_dataloader(
+    resolution_size, batch_size=512, classes_num=100, use_all=False, augmentation=False
+):
     print(f"loading ImageNet100 data with resolution {resolution_size}")
     train_dir = os.path.join(IMAGENET_100_DIR, "train")
     test_dir = os.path.join(IMAGENET_100_DIR, "val")
 
-    train_transform, test_transform = get_ImageNet100_transforms(resolution_size)
+    train_transform, test_transform = get_ImageNet100_transforms(resolution_size, augmentation)
     # train_transform, test_transform = get_down_up_transforms()
 
     train_dataset = datasets.ImageFolder(root=train_dir, transform=train_transform)
@@ -285,9 +312,7 @@ def get_ImageNet100_dataloader(resolution_size, batch_size=512, classes_num=100,
     train_indices = get_balanced_indices(
         train_dataset, data_name, "train", train_samples_per_class, classes_num
     )
-    test_indices = get_balanced_indices(
-        test_dataset, data_name, "val", test_samples_per_class, classes_num
-    )
+    test_indices = get_balanced_indices(test_dataset, data_name, "val", test_samples_per_class, classes_num)
     print(f"train indices: {len(train_indices)}")
     print(f"test indices: {len(test_indices)}")
 
@@ -295,23 +320,39 @@ def get_ImageNet100_dataloader(resolution_size, batch_size=512, classes_num=100,
     train_dataset = Subset(train_dataset, train_indices)
     test_dataset = Subset(test_dataset, test_indices)
     train_dataloader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True
     )
     test_dataloader = DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True
+        test_dataset, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True
     )
 
     return train_dataloader, test_dataloader
 
 
-def get_ImageNet100_transforms(image_size):
-    train_transform = transforms.Compose(
-        [
-            transforms.Resize((image_size, image_size)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-    )
+def get_ImageNet100_transforms(image_size, augmentation=False):
+    # use augmentation on train data
+    if augmentation:
+        print("Use augmentation")
+        padding_size = image_size // 8
+        train_transform = transforms.Compose(
+            [
+                transforms.Resize((image_size, image_size)),
+                transforms.RandomCrop(image_size, padding=padding_size),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ]
+        )
+
+    else:
+        train_transform = transforms.Compose(
+            [
+                transforms.Resize((image_size, image_size)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ]
+        )
+
     test_transform = transforms.Compose(
         [
             transforms.Resize((image_size, image_size)),
@@ -412,9 +453,7 @@ def get_balanced_indices(dataset, dataset_name, dataset_type, samples_per_class=
     return indices
 
 
-def get_balanced_imagenet_input_data(
-    sample_size=15000, resolution=224, num_classes=1000, use_previous=True
-):
+def get_balanced_imagenet_input_data(sample_size=15000, resolution=224, num_classes=1000, use_previous=True):
     val_dir = os.path.join(IMAGENET_DIR, "val")
     train_dir = os.path.join(IMAGENET_DIR, "train")
     train_transform, test_transform = get_imagenet_transforms(resolution_size=resolution)
@@ -476,9 +515,7 @@ def get_balanced_imagenet100_input_data(resolution, sample_size=15000, use_previ
     return input_data
 
 
-def get_balanced_input_indices(
-    dataset, dataset_name, dataset_type, sample_size=15000, classes=None
-):
+def get_balanced_input_indices(dataset, dataset_name, dataset_type, sample_size=15000, classes=None):
     if dataset_type not in ["train", "val"]:
         raise ValueError("dataset_type must be train or val")
 
@@ -507,14 +544,10 @@ def get_balanced_input_indices(
         else:
             current_samples_per_class = samples_per_class
 
-        class_sample_indices = np.random.choice(
-            class_indices, current_samples_per_class, replace=False
-        )
+        class_sample_indices = np.random.choice(class_indices, current_samples_per_class, replace=False)
         indices.extend(class_sample_indices)
 
-    torch.save(
-        indices, f"values/{dataset_name}/indices/balanced_input_{sample_size}_{num_classes}.pt"
-    )
+    torch.save(indices, f"values/{dataset_name}/indices/balanced_input_{sample_size}_{num_classes}.pt")
     return indices
 
 
@@ -561,22 +594,108 @@ def get_imagenet_transforms(resolution_size=224):
     return train_transform, test_transform
 
 
-def get_CIFAR_transforms():
+def get_CIFAR_transforms(augmentation=False):
     test_transform = torchvision.transforms.Compose(
         [
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2615)),
         ]
     )
+    if augmentation:
+        print("Use augmentation")
+        train_transform = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.RandomCrop(32, padding=4),
+                torchvision.transforms.RandomHorizontalFlip(),
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2615)),
+            ]
+        )
 
-    # extra transfrom for the training data, in order to achieve better performance
-    train_transform = torchvision.transforms.Compose(
+    else:
+        train_transform = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2615)),
+            ]
+        )
+    return train_transform, test_transform
+
+
+def get_MNIST_transforms(augmentation=False):
+    if augmentation:
+        train_transform = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.RandomCrop(28, padding=2),
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize((0.1307,), (0.3081,)),
+            ]
+        )
+    else:
+        train_transform = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize((0.1307,), (0.3081,)),
+            ]
+        )
+
+    test_transform = torchvision.transforms.Compose(
         [
             torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2615)),
+            torchvision.transforms.Normalize((0.1307,), (0.3081,)),
         ]
     )
     return train_transform, test_transform
+
+
+def get_yousuf_imagenet100(args, batch_size=512):
+    dataset_train, args.nb_classes = build_dataset(is_train=True, args=args)
+    dataset_val, _ = build_dataset(is_train=False, args=args)
+
+    ####################
+    train_labels = dataset_train.targets
+    train_labels = np.array(train_labels)  ## necessary
+    ## filter out only the indices for the desired class
+    if args.num_class is not None:
+        train_idx = filter_by_class(train_labels, min_class=0, max_class=args.num_class)
+    ####################
+
+    # train_labels = np.load(os.path.join(args.labels_dir, 'imagenet_indices/imagenet_train_labels.npy'))
+    # train_idx = list(np.arange(len(train_labels))[np.array(train_labels) < args.num_class])
+    print("Length of train loader ", len(train_idx))
+
+    sampler_train = torch.utils.data.sampler.SubsetRandomSampler(train_idx)
+    data_loader_train = torch.utils.data.DataLoader(
+        dataset_train,
+        sampler=sampler_train,
+        batch_size=batch_size,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_mem,
+        drop_last=True,
+    )
+
+    ####################
+    val_labels = dataset_val.targets
+    val_labels = np.array(val_labels)  ## necessary
+    ## filter out only the indices for the desired class
+    if args.num_class is not None:
+        val_idx = filter_by_class(val_labels, min_class=0, max_class=args.num_class)
+    ####################
+
+    # val_labels = np.load(os.path.join(args.labels_dir, 'imagenet_indices/imagenet_val_labels.npy'))
+    # val_idx = list(np.arange(len(val_labels))[np.array(val_labels) < args.num_class])
+    print("Length of validation loader ", len(val_idx))
+    sampler_val = torch.utils.data.sampler.SubsetRandomSampler(val_idx)
+    data_loader_val = torch.utils.data.DataLoader(
+        dataset_val,
+        sampler=sampler_val,
+        batch_size=batch_size,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_mem,
+        drop_last=False,
+    )
+
+    return data_loader_train, data_loader_val
 
 
 if __name__ == "__main__":

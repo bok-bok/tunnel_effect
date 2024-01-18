@@ -10,6 +10,7 @@ from data_loader import (
     get_balanced_imagenet_input_data,
     get_cifar_input_data,
     get_data_loader,
+    get_yousuf_imagenet100,
 )
 from utils import get_model
 
@@ -38,37 +39,52 @@ if __name__ == "__main__":
     model_name, pretrained_data, data_name, batch_size, main_device, classifier_device = parser()
     pretrained = True
     resolution = 224
-    class_num = 100
 
+    # get class_num and resolution
     if "imagenet100" in model_name:
+        class_num = 100
         if "32" in model_name:
             resolution = 32
         elif "64" in model_name:
             resolution = 64
         elif "128" in model_name:
             resolution = 128
-        elif "224" in model_name:
+        elif "224" in model_name or "down_up" in model_name:
             resolution = 224
+
         else:
             raise ValueError("resolution not found")
 
     if "cifar" in data_name:
         resolution = 32
+        class_num = 10
 
     weight_path = f"weights/{model_name}.pth"
+
+    if "resnet34_original" in model_name:
+        epochs = model_name.split("_")[-1]
+        weight_path = f"weights/resnet34/resnet34_{epochs}.pth"
+
     # use model_name and pretrained to get model
     model = get_model(model_name, data_name, pretrained, weight_path)
     # main_device = "cpu"
     model.to(main_device)
-
-    train_dataloader, test_dataloader = get_data_loader(
-        data_name, 200, 100, class_num=class_num, batch_size=batch_size, resolution=resolution
-    )
+    if data_name == "yousuf_imagenet100":
+        if "vit" in model_name:
+            checkpoint = torch.load(f"weights/vit/{resolution}.pth")
+        args = checkpoint["args"]
+        train_dataloader, test_dataloader = get_yousuf_imagenet100(args, batch_size)
+        data_name = "imagenet100"
+        pretrained_data = "imagenet100"
+    else:
+        train_dataloader, test_dataloader = get_data_loader(
+            data_name, class_num=class_num, batch_size=batch_size, resolution=resolution
+        )
 
     # start = time.time()
     analyzer = get_analyzer(model, model_name, data_name)
     analyzer.add_gpus(main_device, classifier_device)
-    analyzer.download_accuarcy(train_dataloader, test_dataloader, pretrained_data, resolution)
+    analyzer.download_accuarcy(train_dataloader, test_dataloader, pretrained_data, resolution, GAP=True)
     # analyzer.inspect_layers_dim(dummy_input)
     # end = time.time()
     # print(f"total time  : {end - start}")
