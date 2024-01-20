@@ -9,7 +9,8 @@ import torch
 from sklearn.metrics.pairwise import euclidean_distances
 
 sys.path.append("A-ViT")
-from timm.models.vision_transformer import Block
+# from timm.models.vision_transformer import Block
+from timm.models.te_vision_transformer import Block
 from torch import nn, optim
 from torchvision.models.swin_transformer import SwinTransformerBlock
 from torchvision.models.vision_transformer import EncoderBlock
@@ -24,8 +25,9 @@ from utils.utils import (
     mean_center,
     random_projection_method,
     stable_rank,
-    vectorize_cls_token,
+    vectorize_avg_token,
     vectorize_global_avg_pooling,
+    vectorize_global_avg_pooling_by_2,
     vectorize_global_max_pooling,
 )
 
@@ -143,15 +145,17 @@ class Analyzer(metaclass=ABCMeta):
 
         def hook_vectorization_helper(module, input, output):
             output = output.detach().cpu().to(self.classifier_device)
+
             if len(output.size()) == 4:
-                print(f"patch size: {patch_size}")
-                # if cnn
-                output = vectorize_global_avg_pooling(
-                    output, patch_size, normalize=True, device=self.classifier_device
-                )
+                # print(f"patch size: {patch_size}")
+                # # if cnn
+                # output = vectorize_global_avg_pooling(
+                #     output, patch_size, normalize=True, device=self.classifier_device
+                # )
+                output = vectorize_global_avg_pooling_by_2(output)
             elif len(output.size()) == 3:
                 # if transformer
-                output = vectorize_cls_token(output, normalize=True, device=self.classifier_device)
+                output = vectorize_avg_token(output)
 
             self.representations.append(output)
 
@@ -390,6 +394,7 @@ class Analyzer(metaclass=ABCMeta):
             cur_classifier.to(self.classifier_device)
             self.classifiers.append(cur_classifier)
             self.optimizers.append(cur_optim)
+        print(f"classifier counts: {len(self.classifiers)}")
 
     def check_folder(self, path):
         if not os.path.exists(path):
@@ -515,7 +520,7 @@ class Analyzer(metaclass=ABCMeta):
     def check_last_layer_acc(self, train_dataloader, test_dataloader, resolution):
         self.register_hooks(self.hook_vectorization(resolution=resolution), only_last_layer=True)
         self.init_classifers(resolution)
-        self.train_classifers(train_dataloader)
+        self.train_classifers(train_dataloader, test_dataloader)
         acc = self.test_classifers(test_dataloader)[0]
         return acc
 
@@ -532,6 +537,7 @@ class Analyzer(metaclass=ABCMeta):
             layer.requires_grad = False
         for epoch in range(epochs):
             for data, target in tqdm(data_loader):
+                # for data, target in data_loader:
                 data, target = data.to(self.main_device), target.to(self.classifier_device)
                 self.forward(data)
                 for representation, classifier, optimizer in zip(
@@ -543,17 +549,18 @@ class Analyzer(metaclass=ABCMeta):
                     loss = self.criterion(output, target)
                     loss.backward(retain_graph=True)
                     optimizer.step()
-            print(f"Epoch {epoch+1}/{epochs}")
 
     def test_classifers(self, test_loader):
         self.model.eval()
         for classifier in self.classifiers:
             classifier.eval()
         accuracies = [0 for _ in range(len(self.classifiers))]
+        total = 0
         with torch.no_grad():
             for data, target in test_loader:
                 data, target = data.to(self.main_device), target.to(self.classifier_device)
                 self.forward(data)
+                total += len(target)
 
                 for idx, (representation, classifier) in enumerate(
                     zip(self.representations, self.classifiers)
@@ -563,8 +570,7 @@ class Analyzer(metaclass=ABCMeta):
                     # loss = self.criterion(output, target)
                     correct = output.argmax(dim=1).eq(target).sum().item()
                     accuracies[idx] += correct
-        accuracies = [round(100.0 * correct / len(test_loader.dataset), 2) for correct in accuracies]
-        print(f"accuracy: {accuracies}")
+        accuracies = [round(100.0 * correct / total, 2) for correct in accuracies]
         return accuracies
         # plot accuracy
 
