@@ -651,12 +651,14 @@ def remove_module_prefix(state_dict):
     return new_state_dict
 
 
-def get_vit_tiny_patch8(image_resolution):
-    weights_path_dict = {
-        64: "weights/vit/64.pth",
-    }
+def get_vit_tiny_patch8(image_resolution, model_symbol):
+    # weights_path_dict = {
+    #     64: f"weights/{model_symbol}/{image_resolution}.pth",
+    #     224: f"weights/{model_symbol}/{image_resolution}.pth",
+    # }
+    weight_path = f"weights/{model_symbol}/{image_resolution}.pth"
 
-    checkpoint = torch.load(weights_path_dict[image_resolution])
+    checkpoint = torch.load(weight_path)
     args = checkpoint["args"]
     model = create_model(
         args.model,
@@ -675,25 +677,27 @@ def get_vit_tiny_patch8(image_resolution):
             print(f"Removing key {k} from pretrained checkpoint")
             del checkpoint_model[k]
 
-    # interpolate position embedding
-    pos_embed_checkpoint = checkpoint_model["pos_embed"]
-    embedding_size = pos_embed_checkpoint.shape[-1]
-    num_patches = model.patch_embed.num_patches
-    num_extra_tokens = model.pos_embed.shape[-2] - num_patches
-    # height (== width) for the checkpoint position embedding
-    orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
-    # height (== width) for the new position embedding
-    new_size = int(num_patches**0.5)
-    # class_token and dist_token are kept unchanged
-    extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
-    # only the position tokens are interpolated
-    pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
-    pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
-    pos_tokens = torch.nn.functional.interpolate(
-        pos_tokens, size=(new_size, new_size), mode="bicubic", align_corners=False
-    )
-    pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
-    new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
-    checkpoint_model["pos_embed"] = new_pos_embed
+    # tvit does not have pos_embed
+    if model_symbol != "tvit":
+        # interpolate position embedding
+        pos_embed_checkpoint = checkpoint_model["pos_embed"]
+        embedding_size = pos_embed_checkpoint.shape[-1]
+        num_patches = model.patch_embed.num_patches
+        num_extra_tokens = model.pos_embed.shape[-2] - num_patches
+        # height (== width) for the checkpoint position embedding
+        orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
+        # height (== width) for the new position embedding
+        new_size = int(num_patches**0.5)
+        # class_token and dist_token are kept unchanged
+        extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
+        # only the position tokens are interpolated
+        pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
+        pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
+        pos_tokens = torch.nn.functional.interpolate(
+            pos_tokens, size=(new_size, new_size), mode="bicubic", align_corners=False
+        )
+        pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
+        new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
+        checkpoint_model["pos_embed"] = new_pos_embed
     model.load_state_dict(checkpoint_model, strict=False)
     return model
