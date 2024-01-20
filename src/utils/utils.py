@@ -28,20 +28,19 @@ from torchvision.models import (
     vit_b_16,
 )
 
+from models import get_resnet18, get_resnet18_imagenet100
 from models.models import (
     MLP,
     ResNet18,
     ResNet34,
     ResNet34_GN,
     convnextv2_fcmae,
-    get_resnet18_by_resolution,
     get_resnet34_by_resolution,
     get_vgg11_by_class_num,
     get_vgg11_by_sample_num,
     get_vgg13_imagenet100,
     get_vit_tiny_patch8,
 )
-from models.resnet18 import get_resnet18
 
 sys.path.append("A-ViT")
 
@@ -89,9 +88,27 @@ def random_projection_method(X, b, cov=False):
         return s.detach().cpu(), variance.detach().cpu()
 
 
-def vectorize_cls_token(x, normalize=True, device="cuda"):
+def vectorize_concat_token(x):
     cls_tokens = x[:, 0, :]
-    return cls_tokens
+    tokens_except_class = x[:, 1:, :]
+
+    average_image_tokens = torch.mean(tokens_except_class, dim=1)  # Average the image tokens
+    output = torch.cat((cls_tokens, average_image_tokens), dim=1)  # Concatenate
+    return output
+
+
+def vectorize_avg_token(x):
+    tokens_except_class = x[:, 1:, :]
+
+    average_image_tokens = torch.mean(tokens_except_class, dim=1)  # Average the image tokens
+    # print(f"average_image_tokens shape: {average_image_tokens.size()}")
+    return average_image_tokens
+
+
+def vectorize_global_avg_pooling_by_2(x):
+    output = F.adaptive_avg_pool2d(x, (2, 2))
+    output = output.reshape(output.size(0), -1)
+    return output
 
 
 def vectorize_global_avg_pooling(x, patch_size=2, normalize=False, device="cuda"):
@@ -108,15 +125,10 @@ def vectorize_global_avg_pooling(x, patch_size=2, normalize=False, device="cuda"
 
     # Transformer
     elif len(x.size()) == 3:
-        patch_size = 2
         # remove class token
         x = x[:, 1:]
-        B, T, D = x.size()
-        if T > D:
-            # in case of act transformer
-            x_transposed = x
-        else:
-            x_transposed = x.transpose(1, 2)
+
+        x_transposed = x.transpose(1, 2)
         # print(f"feature shape before processed {x.size()}")
         output = F.avg_pool1d(x_transposed, patch_size, stride=patch_size)
         output = output.transpose(1, 2)
@@ -195,30 +207,22 @@ def get_model(model_name: str, dataset: str, pretrained: bool = True, weights_pa
         return model
     elif "resnet18_imagenet100" in model_name:
         print("loading resnet18 imagenet100 model")
-        residual_connection = True
-        augmentation = False
-        if "no_residual" in model_name:
-            residual_connection = False
-        if "aug" in model_name:
-            augmentation = True
         resolution = get_resolution_from_model_name(model_name)
-        return get_resnet18_by_resolution(
-            resolution,
-            class_num=100,
-            residual_connection=residual_connection,
-            pretrained=pretrained,
-            augmentation=augmentation,
-        )
+        get_resnet18_imagenet100(resolution)
+        return get_resnet18_imagenet100(resolution)
 
     elif "resnet34_imagenet100" in model_name:
         resolution = get_resolution_from_model_name(model_name)
         return get_resnet34_by_resolution(resolution, class_num=100, pretrained=pretrained)
+    elif "tvit_tiny_patch8_imagenet100" in model_name:
+        resolution = get_resolution_from_model_name(model_name)
+        return get_vit_tiny_patch8(resolution, "tvit")
     # elif "avit_tiny_patch8_imagenet100" in model_name:
     #     resolution = get_resolution_from_model_name(model_name)
     #     return get_avit_tiny_patch8(resolution)
     elif "vit_tiny_patch8_imagenet100" in model_name:
         resolution = get_resolution_from_model_name(model_name)
-        return get_vit_tiny_patch8(resolution)
+        return get_vit_tiny_patch8(resolution, "vit")
 
     else:
         return get_imagenet_model(model_name, pretrained)

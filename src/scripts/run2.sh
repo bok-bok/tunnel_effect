@@ -1,84 +1,51 @@
 #!/bin/bash
 
 
-ID_DATA="imagenet"
+ID_DATA="yousuf_imagenet100"
 OOD_DATA="ninco"
 OOD_DATA_2="places"
 
-GPU=1
+GPU=0
+GPU2=1
 
-MODEL="resnet50_swav"
-MODEL2="mugs"
+MODELS=("tvit_tiny_patch8_imagenet100_64" "tvit_tiny_patch8_imagenet100_224")
 
-for i in {1..3}
+for MODEL in "${MODELS[@]}"
 do
-    python main.py \
-    --model $MODEL \
-    --pretrained_data $ID_DATA \
-    --data $OOD_DATA \
-    --batch_size 512 \
-    --gpu1 $GPU \
-    --gpu2 $GPU
+    for i in {1..3}
+    do
+        python main.py \
+        --model $MODEL \
+        --pretrained_data $ID_DATA \
+        --data $ID_DATA \
+        --batch_size 96 \
+        --gpu1 $GPU \
+        --gpu2 $GPU2
+    done
+
+    for i in {1..3}
+    do
+        python main.py \
+        --model $MODEL \
+        --pretrained_data $ID_DATA \
+        --data $OOD_DATA \
+        --batch_size 96 \
+        --gpu1 $GPU \
+        --gpu2 $GPU2
+    done
 done
 
 
 
-
-for i in {1..3}
-do
-    python main.py \
-    --model $MODEL \
-    --pretrained_data $ID_DATA \
-    --data $OOD_DATA_2 \
-    --batch_size 512 \
-    --gpu1 $GPU \
-    --gpu2 $GPU
 done
 
-for i in {1..3}
-do
-    python main.py \
-    --model $MODEL \
-    --pretrained_data $ID_DATA \
-    --data $ID_DATA \
-    --batch_size 512 \
-    --gpu1 $GPU \
-    --gpu2 $GPU
-done
-
-
-for i in {1..3}
-do
-    python main.py \
-    --model $MODEL2 \
-    --pretrained_data $ID_DATA \
-    --data $OOD_DATA \
-    --batch_size 512 \
-    --gpu1 $GPU \
-    --gpu2 $GPU
-done
-
-
-
-
-for i in {1..3}
-do
-    python main.py \
-    --model $MODEL2 \
-    --pretrained_data $ID_DATA \
-    --data $OOD_DATA_2 \
-    --batch_size 512 \
-    --gpu1 $GPU \
-    --gpu2 $GPU
-done
-
-for i in {1..3}
-do
-    python main.py \
-    --model $MODEL2 \
-    --pretrained_data $ID_DATA \
-    --data $ID_DATA \
-    --batch_size 512 \
-    --gpu1 $GPU \
-    --gpu2 $GPU
-done
+# for i in {1..3}
+# do
+#     python main.py \
+#     --model $MODEL \
+#     --pretrained_data $ID_DATA \
+#     --data $OOD_DATA_2 \
+#     --batch_size 512 \
+#     --gpu1 $GPU \
+#     --gpu2 $GPU2
+# done

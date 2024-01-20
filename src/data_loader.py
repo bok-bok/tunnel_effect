@@ -649,6 +649,15 @@ def get_MNIST_transforms(augmentation=False):
 
 
 def get_yousuf_imagenet100(args, batch_size=512):
+    # modify args
+    if "image_size" in args:
+        args.input_size = args.image_size
+        args.data_set = "IMNET"
+        args.data_path = "/data/datasets/ImageNet2012"
+        args.num_class = args.num_classes
+        args.num_workers = args.workers
+        args.pin_mem = True
+
     dataset_train, args.nb_classes = build_dataset(is_train=True, args=args)
     dataset_val, _ = build_dataset(is_train=False, args=args)
 
@@ -656,12 +665,17 @@ def get_yousuf_imagenet100(args, batch_size=512):
     train_labels = dataset_train.targets
     train_labels = np.array(train_labels)  ## necessary
     ## filter out only the indices for the desired class
-    if args.num_class is not None:
-        train_idx = filter_by_class(train_labels, min_class=0, max_class=args.num_class)
+    # if args.num_class is not None:
+    #     train_idx = filter_by_class(train_labels, min_class=0, max_class=args.num_class)
     ####################
 
     # train_labels = np.load(os.path.join(args.labels_dir, 'imagenet_indices/imagenet_train_labels.npy'))
     # train_idx = list(np.arange(len(train_labels))[np.array(train_labels) < args.num_class])
+
+    # use 200 samples per class
+    if args.num_class is not None:
+        # train_idx = get_balanced_indices_yousuf(dataset_train, args.num_class, 200)
+        train_idx = filter_by_class(train_labels, min_class=0, max_class=args.num_class)
     print("Length of train loader ", len(train_idx))
 
     sampler_train = torch.utils.data.sampler.SubsetRandomSampler(train_idx)
@@ -696,6 +710,16 @@ def get_yousuf_imagenet100(args, batch_size=512):
     )
 
     return data_loader_train, data_loader_val
+
+
+def get_balanced_indices_yousuf(dataset, num_class, samples_per_class):
+    balanced_indices = []
+    for class_idx in range(num_class):
+        class_indices = np.where(np.array(dataset.targets) == class_idx)[0]
+        if samples_per_class is not None and len(class_indices) >= samples_per_class:
+            class_indices = np.random.choice(class_indices, samples_per_class, replace=False)
+        balanced_indices.extend(class_indices)
+    return balanced_indices
 
 
 if __name__ == "__main__":

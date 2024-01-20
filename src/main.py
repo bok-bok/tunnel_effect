@@ -70,8 +70,12 @@ if __name__ == "__main__":
     # main_device = "cpu"
     model.to(main_device)
     if data_name == "yousuf_imagenet100":
-        if "vit" in model_name:
-            checkpoint = torch.load(f"weights/vit/{resolution}.pth")
+        if "resnet18_imagenet100" in model_name:
+            checkpoint = torch.load(f"weights/resnet18_imagenet100/{resolution}.pth")
+        if "tvit" in model_name:
+            checkpoint = torch.load(f"weights/tvit/{resolution}.pth")
+
+        print("loading yousuf_imagenet100")
         args = checkpoint["args"]
         train_dataloader, test_dataloader = get_yousuf_imagenet100(args, batch_size)
         data_name = "imagenet100"
@@ -80,7 +84,8 @@ if __name__ == "__main__":
         train_dataloader, test_dataloader = get_data_loader(
             data_name, class_num=class_num, batch_size=batch_size, resolution=resolution
         )
-
+    if pretrained_data == "yousuf_imagenet100":
+        pretrained_data = "imagenet100"
     # start = time.time()
     analyzer = get_analyzer(model, model_name, data_name)
     analyzer.add_gpus(main_device, classifier_device)
